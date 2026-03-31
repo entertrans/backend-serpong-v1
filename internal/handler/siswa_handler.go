@@ -1,15 +1,19 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/entertrans/go-base-project.git/internal/controller"
+	"github.com/entertrans/go-base-project.git/internal/dto"
+
 )
 
 type SiswaHandler interface {
 	GetAllSiswa(c *gin.Context)
+	CreateSiswa(c *gin.Context)
 }
 
 type siswaHandler struct {
@@ -33,4 +37,28 @@ func (h *siswaHandler) GetAllSiswa(c *gin.Context) {
 		"message": "Data siswa berhasil diambil",
 		"data":    siswaList,
 	})
+}
+
+// CreateSiswa handler untuk membuat siswa baru
+func (h *siswaHandler) CreateSiswa(c *gin.Context) {
+	var req dto.CreateSiswaRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fmt.Println("❌ BIND ERROR:", err)
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	fmt.Println("✅ REQUEST MASUK:", req)
+
+	err := h.siswaController.CreateSiswa(req)
+	if err != nil {
+		fmt.Println("❌ CONTROLLER ERROR:", err)
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	fmt.Println("✅ SUCCESS INSERT")
+
+	c.JSON(200, gin.H{"success": true})
 }

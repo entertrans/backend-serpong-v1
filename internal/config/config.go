@@ -22,6 +22,15 @@ type Config struct {
 	DBPass    string
 	DBName    string
 	JWTSecret string
+	// Google Drive OAuth
+GDriveOAuthClientID     string
+GDriveOAuthClientSecret string
+GDriveTokenPath         string
+GDriveFolderID          string
+
+// 	GDriveCredentialsPath string
+// GDriveFolderID        string
+
 }
 
 // Tambahkan DB sebagai field global
@@ -46,6 +55,14 @@ func LoadConfig() *Config {
 		DBPass:    getEnv("DB_PASS", ""),
 		DBName:    getEnv("DB_NAME", "go_base"),
 		JWTSecret: getEnv("JWT_SECRET", "rahasia"),
+		GDriveOAuthClientID:     getEnv("GDRIVE_OAUTH_CLIENT_ID", ""),
+GDriveOAuthClientSecret: getEnv("GDRIVE_OAUTH_CLIENT_SECRET", ""),
+GDriveTokenPath:         getEnv("GDRIVE_TOKEN_PATH", "storage/gdrive-token.json"),
+GDriveFolderID:          getEnv("GDRIVE_FOLDER_ID", ""),
+
+// 		GDriveCredentialsPath: getEnv("GDRIVE_CREDENTIALS_PATH", "storage/gdrive-service-account.json"),
+// GDriveFolderID:        getEnv("GDRIVE_FOLDER_ID", ""),
+
 	}
 
 	return cfg

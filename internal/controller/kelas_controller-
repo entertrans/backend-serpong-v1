@@ -1,0 +1,42 @@
+package controller
+
+import (
+	"gorm.io/gorm"
+
+	"github.com/entertrans/go-base-project.git/internal/dto"
+	"github.com/entertrans/go-base-project.git/internal/model"
+)
+
+type KelasController interface {
+    GetAllKelas() ([]dto.KelasListItem, error)
+}
+
+type kelasController struct {
+    db *gorm.DB
+}
+
+func NewKelasController(db *gorm.DB) KelasController {
+    return &kelasController{db: db}
+}
+
+func (c *kelasController) GetAllKelas() ([]dto.KelasListItem, error) {
+    var kelasList []model.Kelas
+
+    err := c.db.
+        Order("kelas_id asc").
+        Find(&kelasList).Error
+    if err != nil {
+        return nil, err
+    }
+
+    result := make([]dto.KelasListItem, 0, len(kelasList))
+    for _, k := range kelasList {
+        result = append(result, dto.KelasListItem{
+            KelasId:   k.KelasId,
+            KelasNama: k.KelasNama,
+            IsAlumni:  k.KelasId > 15,
+        })
+    }
+
+    return result, nil
+}

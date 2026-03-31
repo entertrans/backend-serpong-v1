@@ -1,0 +1,37 @@
+KONTEKS
+Saya punya backend Golang pakai Gin + GORM (MySQL) dengan struktur:
+main.go -> router.RegisterModules(...) -> modules/<nama>/module.go -> handler -> controller -> dto.
+Saya ingin kamu buat fitur baru dengan gaya clean code dan konsisten seperti modul masterdata saya.
+
+TEKNOLOGI
+- Golang (Gin framework)
+- GORM (MySQL)
+- Struktur wajib: module (router) → handler → controller → dto
+- Middleware auth: middleware.AuthMiddleware(cfg.JWTSecret)
+
+GAYA KODING (WAJIB)
+- Handler tipis: ambil param, panggil controller, return JSON.
+- Controller query pakai c.db (DI), gunakan Preload relasi jika perlu.
+- Output pakai DTO yang rapi, mapping dipisah helper jika reusable.
+
+FORMAT OUTPUT (WAJIB URUT)
+1. Module
+2. Handler
+3. Controller
+4. DTO
+
+SPESIFIKASI FITUR
+- Nama module: siswamodule
+- Endpoint: GET /api/v1/siswa/:nis
+- Auth: YA (pakai AuthMiddleware(cfg.JWTSecret))
+- Input:
+  - Path params: nis
+- Output:
+  - Kalau ditemukan: return data siswa lengkap (termasuk kelas, satelit, orangtua, lampiran)
+  - Kalau tidak ditemukan: return 404 dengan { "error": "siswa not found" }
+- Model relevan (ini contoh, nanti saya paste dari project saya):
+  [PASTE model.Siswa, model.Kelas, model.DtSatelit, model.Orangtua, model.Lampiran]
+- Relasi preload:
+  Preload("Kelas"), Preload("Satelit"), Preload("Orangtua"), Preload("Lampiran")
+
+TOLONG BUATKAN KODENYA SESUAI FORMAT OUTPUT DAN GAYA KODING DI ATAS.
