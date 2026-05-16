@@ -16,7 +16,6 @@ type AuthService interface {
 	RegisterUser(email, password, name string) (*model.User, error)
 	LoginUser(email, password string) (string, *model.User, error)
 	GetUserByID(userID uint) (*model.User, error)
-	CreateSiswaUser(nis, name string) (*model.User, error) // TAMBAHKAN INI
 }
 
 type authService struct {
@@ -82,34 +81,4 @@ func (s *authService) GenerateToken(userID uint) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(s.cfg.JWTSecret))
-}
-
-// ==================== TAMBAHKAN METHOD INI ====================
-// CreateSiswaUser membuat user untuk siswa dengan default password = NIS
-func (s *authService) CreateSiswaUser(nis, name string) (*model.User, error) {
-	email := nis + "@siswa.sch.id"
-	
-	// Cek apakah user sudah ada
-	existingUser, err := s.repo.FindByEmail(email)
-	if err == nil && existingUser != nil {
-		return nil, errors.New("user dengan NIS ini sudah terdaftar")
-	}
-	
-	// Hash password (default = NIS)
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(nis), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
-	}
-	
-	user := &model.User{
-		Email:    email,
-		Password: string(hashedPassword),
-		Name:     name,
-	}
-	
-	if err := s.repo.Create(user); err != nil {
-		return nil, err
-	}
-	
-	return user, nil
 }

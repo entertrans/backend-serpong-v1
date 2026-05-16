@@ -13,23 +13,24 @@ import (
 )
 
 type Config struct {
-	AppEnv    string
-	AppPort   string
-	DBDriver  string
-	DBHost    string
-	DBPort    string
-	DBUser    string
-	DBPass    string
-	DBName    string
-	JWTSecret string
+	AppEnv      string
+	AppPort     string
+	DBDriver    string
+	DBHost      string
+	DBPort      string
+	DBUser      string
+	DBPass      string
+	DBName      string
+	JWTSecret   string
+	StoragePath string
 	// Google Drive OAuth
-GDriveOAuthClientID     string
-GDriveOAuthClientSecret string
-GDriveTokenPath         string
-GDriveFolderID          string
+	// GDriveOAuthClientID     string
+	// GDriveOAuthClientSecret string
+	// GDriveTokenPath         string
+	// GDriveFolderID          string
 
-// 	GDriveCredentialsPath string
-// GDriveFolderID        string
+	// 	GDriveCredentialsPath string
+	// GDriveFolderID        string
 
 }
 
@@ -55,13 +56,15 @@ func LoadConfig() *Config {
 		DBPass:    getEnv("DB_PASS", ""),
 		DBName:    getEnv("DB_NAME", "go_base"),
 		JWTSecret: getEnv("JWT_SECRET", "rahasia"),
-		GDriveOAuthClientID:     getEnv("GDRIVE_OAUTH_CLIENT_ID", ""),
-GDriveOAuthClientSecret: getEnv("GDRIVE_OAUTH_CLIENT_SECRET", ""),
-GDriveTokenPath:         getEnv("GDRIVE_TOKEN_PATH", "storage/gdrive-token.json"),
-GDriveFolderID:          getEnv("GDRIVE_FOLDER_ID", ""),
+		// path penyimpanan lampiran local
+		StoragePath: getEnv("STORAGE_PATH", "storage/lampiran"),
+		// GDriveOAuthClientID:     getEnv("GDRIVE_OAUTH_CLIENT_ID", ""),
+		// GDriveOAuthClientSecret: getEnv("GDRIVE_OAUTH_CLIENT_SECRET", ""),
+		// GDriveTokenPath:         getEnv("GDRIVE_TOKEN_PATH", "storage/gdrive-token.json"),
+		// GDriveFolderID:          getEnv("GDRIVE_FOLDER_ID", ""),
 
-// 		GDriveCredentialsPath: getEnv("GDRIVE_CREDENTIALS_PATH", "storage/gdrive-service-account.json"),
-// GDriveFolderID:        getEnv("GDRIVE_FOLDER_ID", ""),
+		// 		GDriveCredentialsPath: getEnv("GDRIVE_CREDENTIALS_PATH", "storage/gdrive-service-account.json"),
+		// GDriveFolderID:        getEnv("GDRIVE_FOLDER_ID", ""),
 
 	}
 

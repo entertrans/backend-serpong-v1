@@ -5,17 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"google.golang.org/api/drive/v3"
 	"gorm.io/gorm"
 
 	"github.com/entertrans/go-base-project.git/internal/config"
 	"github.com/entertrans/go-base-project.git/internal/dto"
 	"github.com/entertrans/go-base-project.git/internal/model"
-	"github.com/entertrans/go-base-project.git/internal/service"
 )
 
 var (
@@ -34,34 +34,50 @@ type LampiranController struct {
 }
 
 func NewLampiranController(db *gorm.DB, cfg *config.Config) *LampiranController {
-	return &LampiranController{db: db, cfg: cfg}
+	return &LampiranController{
+		db:  db,
+		cfg: cfg,
+	}
 }
 
 /* =========================
-   Public methods
+   GET ALL BY NIS
 ========================= */
 
-func (c *LampiranController) GetByNIS(ctx context.Context, nis string) (dto.SiswaLampiranResponse, error) {
+func (c *LampiranController) GetByNIS(
+	ctx context.Context,
+	nis string,
+) (dto.SiswaLampiranResponse, error) {
+
 	var siswa model.Siswa
-	if err := c.db.WithContext(ctx).First(&siswa, "siswa_nis = ?", nis).Error; err != nil {
+
+	if err := c.db.WithContext(ctx).
+		First(&siswa, "siswa_nis = ?", nis).Error; err != nil {
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return dto.SiswaLampiranResponse{}, ErrSiswaNotFound
 		}
+
 		return dto.SiswaLampiranResponse{}, err
 	}
 
 	var list []model.Lampiran
+
 	if err := c.db.WithContext(ctx).
 		Where("siswa_nis = ?", nis).
 		Order("uploaded_at DESC").
 		Find(&list).Error; err != nil {
+
 		return dto.SiswaLampiranResponse{}, err
 	}
 
 	return dto.MapSiswaLampiranToResponse(siswa, list), nil
 }
 
-// Upload JPG via backend -> Google Drive -> upsert DB
+/* =========================
+   UPLOAD FILE
+========================= */
+
 func (c *LampiranController) Upload(
 	ctx context.Context,
 	nis string,
@@ -72,228 +88,288 @@ func (c *LampiranController) Upload(
 	reader io.Reader,
 ) (dto.LampiranResponse, error) {
 
+	// validasi siswa
 	if !c.siswaExists(ctx, nis) {
 		return dto.LampiranResponse{}, ErrSiswaNotFound
 	}
 
+	// validasi jenis dokumen
 	if err := validateDokumenJenis(dokumenJenis); err != nil {
 		return dto.LampiranResponse{}, err
 	}
-	if err := validateJpegOnly(mime); err != nil {
+
+	// validasi mime
+	if err := validateMime(mime); err != nil {
 		return dto.LampiranResponse{}, err
 	}
+
+	// validasi ukuran
 	if err := validateSize(sizeBytes); err != nil {
 		return dto.LampiranResponse{}, err
 	}
-	if strings.TrimSpace(fileName) == "" {
-		fileName = dokumenJenis + ".jpg"
+
+	// buat nama file final
+	finalFileName := buildLocalFileName(
+		dokumenJenis,
+		fileName,
+	)
+
+	// path folder siswa
+	studentDir := filepath.Join(
+		c.cfg.StoragePath,
+		nis,
+	)
+
+	// buat folder jika belum ada
+	if err := os.MkdirAll(studentDir, os.ModePerm); err != nil {
+		return dto.LampiranResponse{}, err
 	}
 
-	driveFileID, err := c.uploadToDrive(ctx, reader, buildDriveFileName(nis, dokumenJenis, fileName), mime)
+	// relative path untuk DB
+	relativePath := filepath.Join(
+		nis,
+		finalFileName,
+	)
+
+	// full path fisik
+	fullPath := filepath.Join(
+		c.cfg.StoragePath,
+		relativePath,
+	)
+
+	// simpan file ke disk
+	dst, err := os.Create(fullPath)
 	if err != nil {
+		return dto.LampiranResponse{}, err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, reader); err != nil {
 		return dto.LampiranResponse{}, err
 	}
 
 	now := time.Now()
+
 	var out model.Lampiran
-	var oldDriveID string
+	var oldObjectKey string
 
 	txErr := c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+
 		var existing model.Lampiran
-		qerr := tx.First(&existing, "siswa_nis = ? AND dokumen_jenis = ?", nis, dokumenJenis).Error
+
+		qerr := tx.First(
+			&existing,
+			"siswa_nis = ? AND dokumen_jenis = ?",
+			nis,
+			dokumenJenis,
+		).Error
+
 		if qerr != nil && !errors.Is(qerr, gorm.ErrRecordNotFound) {
 			return qerr
 		}
 
+		// replace existing
 		if qerr == nil {
-			// replace
-			oldDriveID = existing.ObjectKey
 
-			existing.StorageProvider = "gdrive"
-			existing.ObjectKey = driveFileID
-			existing.FileName = fileName
+			// simpan file lama untuk dihapus nanti
+			oldObjectKey = existing.ObjectKey
+
+			existing.StorageProvider = "local"
+			existing.ObjectKey = relativePath
+			existing.FileName = finalFileName
 			existing.MimeType = mime
 			existing.SizeBytes = sizeBytes
-			existing.ETag = "" // tidak dipakai di drive
 			existing.UploadedAt = now
 
-			if uerr := tx.Save(&existing).Error; uerr != nil {
-				return uerr
+			if err := tx.Save(&existing).Error; err != nil {
+				return err
 			}
+
 			out = existing
+
 			return nil
 		}
 
+		// create new
 		newRec := model.Lampiran{
 			SiswaNIS:        nis,
 			DokumenJenis:    dokumenJenis,
-			StorageProvider: "gdrive",
-			ObjectKey:       driveFileID,
-			FileName:        fileName,
+			StorageProvider: "local",
+			ObjectKey:       relativePath,
+			FileName:        finalFileName,
 			MimeType:        mime,
 			SizeBytes:       sizeBytes,
-			ETag:            "",
 			UploadedAt:      now,
 		}
-		if cerr := tx.Create(&newRec).Error; cerr != nil {
-			return cerr
+
+		if err := tx.Create(&newRec).Error; err != nil {
+			return err
 		}
+
 		out = newRec
+
 		return nil
 	})
 
+	// rollback cleanup jika DB gagal
 	if txErr != nil {
-		// best-effort cleanup file yang barusan diupload agar tidak jadi sampah
-		_ = c.deleteDriveFileBestEffort(ctx, driveFileID)
+
+		// hapus file baru agar tidak orphan
+		_ = os.Remove(fullPath)
+
 		return dto.LampiranResponse{}, txErr
 	}
 
-	// best-effort delete file lama jika replace
-	if oldDriveID != "" && oldDriveID != driveFileID {
-		_ = c.deleteDriveFileBestEffort(ctx, oldDriveID)
+	// delete file lama jika replace
+	if oldObjectKey != "" && oldObjectKey != relativePath {
+
+		oldPath := filepath.Join(
+			c.cfg.StoragePath,
+			oldObjectKey,
+		)
+
+		_ = os.Remove(oldPath)
 	}
 
 	return dto.MapLampiranToResponse(out), nil
 }
 
-// Stream file by lampiran id (untuk handler menulis ke ResponseWriter)
-func (c *LampiranController) DownloadByID(ctx context.Context, idStr string) (contentType string, body io.ReadCloser, err error) {
+/* =========================
+   DOWNLOAD / PREVIEW FILE
+========================= */
+
+func (c *LampiranController) DownloadByID(
+	ctx context.Context,
+	idStr string,
+) (string, io.ReadCloser, error) {
+
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: invalid id", ErrValidation)
 	}
 
 	var l model.Lampiran
-	if err := c.db.WithContext(ctx).First(&l, "id_lampiran = ?", id).Error; err != nil {
+
+	if err := c.db.WithContext(ctx).
+		First(&l, "id_lampiran = ?", id).Error; err != nil {
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", nil, ErrLampiranNotFound
 		}
+
 		return "", nil, err
 	}
 
-	if l.StorageProvider != "gdrive" {
-		return "", nil, fmt.Errorf("%w: unsupported storage_provider", ErrValidation)
-	}
+	fullPath := filepath.Join(
+		c.cfg.StoragePath,
+		l.ObjectKey,
+	)
 
-	srv, err := service.NewDriveServiceOAuth(ctx, service.DriveOAuthCfg{
-	ClientID:     c.cfg.GDriveOAuthClientID,
-	ClientSecret: c.cfg.GDriveOAuthClientSecret,
-	TokenPath:    c.cfg.GDriveTokenPath,
-})
+	file, err := os.Open(fullPath)
 	if err != nil {
 		return "", nil, err
 	}
 
-	// Ambil metadata untuk content-type (optional)
-	meta, _ := srv.Files.Get(l.ObjectKey).Fields("mimeType").Do()
+	contentType := l.MimeType
 
-	resp, err := srv.Files.Get(l.ObjectKey).Download()
-	if err != nil {
-		return "", nil, err
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
 
-	ct := l.MimeType
-	if ct == "" && meta != nil && meta.MimeType != "" {
-		ct = meta.MimeType
-	}
-	if ct == "" {
-		ct = "image/jpeg"
-	}
-
-	return ct, resp.Body, nil
+	return contentType, file, nil
 }
 
-func (c *LampiranController) DeleteByJenis(ctx context.Context, nis, jenis string) (dto.DeleteLampiranResponse, error) {
+/* =========================
+   DELETE FILE
+========================= */
+
+func (c *LampiranController) DeleteByJenis(
+	ctx context.Context,
+	nis,
+	jenis string,
+) (dto.DeleteLampiranResponse, error) {
+
 	if !c.siswaExists(ctx, nis) {
 		return dto.DeleteLampiranResponse{}, ErrSiswaNotFound
 	}
+
 	if err := validateDokumenJenis(jenis); err != nil {
 		return dto.DeleteLampiranResponse{}, err
 	}
 
 	var l model.Lampiran
-	if err := c.db.WithContext(ctx).First(&l, "siswa_nis = ? AND dokumen_jenis = ?", nis, jenis).Error; err != nil {
+
+	if err := c.db.WithContext(ctx).
+		First(
+			&l,
+			"siswa_nis = ? AND dokumen_jenis = ?",
+			nis,
+			jenis,
+		).Error; err != nil {
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return dto.DeleteLampiranResponse{}, ErrLampiranNotFound
 		}
+
 		return dto.DeleteLampiranResponse{}, err
 	}
 
-	driveID := l.ObjectKey
+	// delete DB dulu
+	if err := c.db.WithContext(ctx).
+		Delete(&l).Error; err != nil {
 
-	if err := c.db.WithContext(ctx).Delete(&l).Error; err != nil {
 		return dto.DeleteLampiranResponse{}, err
 	}
 
-	_ = c.deleteDriveFileBestEffort(ctx, driveID)
+	// delete physical file
+	fullPath := filepath.Join(
+		c.cfg.StoragePath,
+		l.ObjectKey,
+	)
+
+	_ = os.Remove(fullPath)
 
 	return dto.DeleteLampiranResponse{
 		Message:      "lampiran deleted",
 		SiswaNIS:     nis,
 		DokumenJenis: jenis,
-		ObjectKey:    driveID,
+		ObjectKey:    l.ObjectKey,
 	}, nil
 }
 
 /* =========================
-   Internal helpers
+   HELPERS
 ========================= */
 
-func (c *LampiranController) siswaExists(ctx context.Context, nis string) bool {
+func (c *LampiranController) siswaExists(
+	ctx context.Context,
+	nis string,
+) bool {
+
 	var count int64
-	err := c.db.WithContext(ctx).Model(&model.Siswa{}).
+
+	err := c.db.WithContext(ctx).
+		Model(&model.Siswa{}).
 		Where("siswa_nis = ?", nis).
 		Count(&count).Error
+
 	return err == nil && count > 0
 }
 
-func (c *LampiranController) uploadToDrive(ctx context.Context, file io.Reader, fileName, mime string) (string, error) {
-	if strings.TrimSpace(c.cfg.GDriveFolderID) == "" {
-  return "", fmt.Errorf("%w: GDRIVE_FOLDER_ID is empty", ErrValidation)
-}
+func buildLocalFileName(
+	jenis,
+	original string,
+) string {
 
-	srv, err := service.NewDriveServiceOAuth(ctx, service.DriveOAuthCfg{
-	ClientID:     c.cfg.GDriveOAuthClientID,
-	ClientSecret: c.cfg.GDriveOAuthClientSecret,
-	TokenPath:    c.cfg.GDriveTokenPath,
-})
-	if err != nil {
-		return "", err
-	}
+	ext := strings.ToLower(
+		filepath.Ext(original),
+	)
 
-	f := &drive.File{
-		Name:    fileName,
-		Parents: []string{c.cfg.GDriveFolderID},
-	}
-
-	res, err := srv.Files.Create(f).
-		Media(file).
-		SupportsAllDrives(true).
-		Fields("id").
-		Do()
-	if err != nil {
-		return "", err
-	}
-	return res.Id, nil
-}
-
-func (c *LampiranController) deleteDriveFileBestEffort(ctx context.Context, fileID string) error {
-	if strings.TrimSpace(fileID) == "" {
-		return nil
-	}
-	srv, err := service.NewDriveServiceOAuth(ctx, service.DriveOAuthCfg{
-	ClientID:     c.cfg.GDriveOAuthClientID,
-	ClientSecret: c.cfg.GDriveOAuthClientSecret,
-	TokenPath:    c.cfg.GDriveTokenPath,
-})
-	if err != nil {
-		return err
-	}
-	return srv.Files.Delete(fileID).SupportsAllDrives(true).Do()
+	return jenis + ext
 }
 
 /* =========================
-   Validation
+   VALIDATION
 ========================= */
 
 var allowedDokumenJenis = map[string]struct{}{
@@ -308,36 +384,64 @@ var allowedDokumenJenis = map[string]struct{}{
 }
 
 func validateDokumenJenis(jenis string) error {
+
 	jenis = strings.TrimSpace(jenis)
+
 	if jenis == "" {
-		return fmt.Errorf("%w: dokumen_jenis is required", ErrValidation)
+		return fmt.Errorf(
+			"%w: dokumen_jenis is required",
+			ErrValidation,
+		)
 	}
+
 	if _, ok := allowedDokumenJenis[jenis]; !ok {
-		return fmt.Errorf("%w: dokumen_jenis not allowed", ErrValidation)
+		return fmt.Errorf(
+			"%w: dokumen_jenis not allowed",
+			ErrValidation,
+		)
 	}
+
 	return nil
 }
 
-func validateJpegOnly(mime string) error {
-	m := strings.ToLower(strings.TrimSpace(mime))
-	if m != "image/jpeg" && m != "image/jpg" {
-		return fmt.Errorf("%w: only image/jpeg is allowed", ErrValidation)
+func validateMime(mime string) error {
+
+	mime = strings.ToLower(
+		strings.TrimSpace(mime),
+	)
+
+	allowed := map[string]bool{
+		"image/jpeg": true,
+		"image/jpg":  true,
+		"image/png":  true,
 	}
+
+	if !allowed[mime] {
+		return fmt.Errorf(
+			"%w: unsupported file type",
+			ErrValidation,
+		)
+	}
+
 	return nil
 }
 
 func validateSize(size int64) error {
-	if size <= 0 {
-		return fmt.Errorf("%w: size_bytes must be > 0", ErrValidation)
-	}
-	if size > 2*1024*1024 {
-		return fmt.Errorf("%w: max file size is 2MB", ErrValidation)
-	}
-	return nil
-}
 
-func buildDriveFileName(nis, jenis, original string) string {
-	// aman & konsisten: nis_jenis_timestamp_original
-	base := strings.ReplaceAll(original, " ", "_")
-	return fmt.Sprintf("%s_%s_%d_%s", nis, jenis, time.Now().Unix(), base)
+	if size <= 0 {
+		return fmt.Errorf(
+			"%w: invalid file size",
+			ErrValidation,
+		)
+	}
+
+	// max 200kb
+	if size > 200*1024 {
+		return fmt.Errorf(
+			"%w: max file size is 200kb",
+			ErrValidation,
+		)
+	}
+
+	return nil
 }

@@ -1,0 +1,155 @@
+// internal/modules/rapor/controller/tahun_ajaran_controller.go
+package controller
+
+import (
+	"errors"
+	"time"
+
+	"github.com/entertrans/go-base-project.git/internal/dto"
+	"github.com/entertrans/go-base-project.git/internal/model"
+	"gorm.io/gorm"
+)
+
+type TahunAjaranController interface {
+	GetAllTahunAjaran() (dto.TahunAjaranListResponse, error)
+	CreateTahunAjaran(req dto.CreateTahunAjaranRequest) (dto.TahunAjaranResponse, error)
+	ActivateTahunAjaran(taID uint) (dto.ActivateTahunAjaranResponse, error)
+	PublishTahunAjaran(taID uint) (dto.ActivateTahunAjaranResponse, error)
+}
+
+type tahunAjaranController struct {
+	db *gorm.DB
+}
+
+func NewTahunAjaranController(db *gorm.DB) TahunAjaranController {
+	return &tahunAjaranController{db: db}
+}
+
+// GetAllTahunAjaran - mengambil semua data tahun ajaran
+func (c *tahunAjaranController) GetAllTahunAjaran() (dto.TahunAjaranListResponse, error) {
+	var tahunAjaranList []model.TahunAjaran
+	err := c.db.Order("ta_id DESC").Find(&tahunAjaranList).Error
+	if err != nil {
+		return dto.TahunAjaranListResponse{}, err
+	}
+
+	var response dto.TahunAjaranListResponse
+	for _, ta := range tahunAjaranList {
+		response.Data = append(response.Data, dto.TahunAjaranResponse{
+			TaID:        ta.TaID,
+			TahunAjaran: ta.TahunAjaran,
+			Semester:    ta.Semester,
+			Status:      ta.Status, // langsung pakai status dari DB
+			IsActive:    ta.IsActive,
+			CreatedAt:   ta.CreatedAt,
+		})
+	}
+	return response, nil
+}
+
+// CreateTahunAjaran - membuat tahun ajaran baru dengan status draft
+func (c *tahunAjaranController) CreateTahunAjaran(req dto.CreateTahunAjaranRequest) (dto.TahunAjaranResponse, error) {
+	// Cek apakah tahun ajaran + semester sudah ada
+	var existing model.TahunAjaran
+	err := c.db.Where("tahun_ajaran = ? AND semester = ?", req.TahunAjaran, req.Semester).
+		First(&existing).Error
+
+	if err == nil {
+		return dto.TahunAjaranResponse{}, errors.New("tahun ajaran dan semester sudah ada")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return dto.TahunAjaranResponse{}, err
+	}
+
+	// Buat baru
+	newTA := model.TahunAjaran{
+		TahunAjaran: req.TahunAjaran,
+		Semester:    req.Semester,
+		IsActive:    false,
+		CreatedAt:   time.Now(),
+	}
+
+	err = c.db.Create(&newTA).Error
+	if err != nil {
+		return dto.TahunAjaranResponse{}, err
+	}
+
+	return dto.TahunAjaranResponse{
+		TaID:        newTA.TaID,
+		TahunAjaran: newTA.TahunAjaran,
+		Semester:    newTA.Semester,
+		Status:      "draft",
+		IsActive:    false,
+		CreatedAt:   newTA.CreatedAt,
+	}, nil
+}
+
+// ActivateTahunAjaran - mengaktifkan tahun ajaran (draft -> aktif)
+func (c *tahunAjaranController) ActivateTahunAjaran(taID uint) (dto.ActivateTahunAjaranResponse, error) {
+	var ta model.TahunAjaran
+	err := c.db.First(&ta, taID).Error
+	if err != nil {
+		return dto.ActivateTahunAjaranResponse{}, errors.New("tahun ajaran tidak ditemukan")
+	}
+
+	if ta.Status != "draft" {
+		return dto.ActivateTahunAjaranResponse{}, errors.New("hanya status draft yang bisa diaktifkan")
+	}
+
+	// Nonaktifkan TA lain
+	err = c.db.Model(&model.TahunAjaran{}).Where("status = ?", "aktif").Update("status", "draft").Error
+	if err != nil {
+		return dto.ActivateTahunAjaranResponse{}, err
+	}
+
+	ta.Status = "aktif"
+	ta.IsActive = true
+	err = c.db.Save(&ta).Error
+	if err != nil {
+		return dto.ActivateTahunAjaranResponse{}, err
+	}
+
+	return dto.ActivateTahunAjaranResponse{
+		TaID:        ta.TaID,
+		TahunAjaran: ta.TahunAjaran,
+		Semester:    ta.Semester,
+		Status:      "aktif",
+		IsActive:    true,
+		Message:     "Tahun ajaran berhasil diaktifkan",
+	}, nil
+}
+
+// PublishTahunAjaran - aktif -> selesai (baru!)
+func (c *tahunAjaranController) PublishTahunAjaran(taID uint) (dto.ActivateTahunAjaranResponse, error) {
+	var ta model.TahunAjaran
+	err := c.db.First(&ta, taID).Error
+	if err != nil {
+		return dto.ActivateTahunAjaranResponse{}, errors.New("tahun ajaran tidak ditemukan")
+	}
+
+	if ta.Status != "aktif" {
+		return dto.ActivateTahunAjaranResponse{}, errors.New("hanya status aktif yang bisa dipublish")
+	}
+
+	// Update status semua raport menjadi publish = true
+	err = c.db.Model(&model.Raport{}).Where("ta_id = ?", taID).Update("status_publish", true).Error
+	if err != nil {
+		return dto.ActivateTahunAjaranResponse{}, err
+	}
+
+	ta.Status = "selesai"
+	ta.IsActive = false
+	err = c.db.Save(&ta).Error
+	if err != nil {
+		return dto.ActivateTahunAjaranResponse{}, err
+	}
+
+	return dto.ActivateTahunAjaranResponse{
+		TaID:        ta.TaID,
+		TahunAjaran: ta.TahunAjaran,
+		Semester:    ta.Semester,
+		Status:      "selesai",
+		IsActive:    false,
+		Message:     "Rapor berhasil dipublish, nilai sudah terkunci",
+	}, nil
+}

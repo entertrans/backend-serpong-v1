@@ -1,0 +1,384 @@
+package controller
+
+import (
+	"fmt"
+
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+
+	"github.com/entertrans/go-base-project.git/internal/dto"
+	"github.com/entertrans/go-base-project.git/internal/helper"
+	"github.com/entertrans/go-base-project.git/internal/model"
+)
+
+type SiswaController interface {
+	GetAllSiswa() ([]dto.SiswaResponse, error)
+	CreateSiswa(req dto.CreateSiswaRequest) error
+	UpdateSiswa(nis string, req dto.UpdateSiswaRequest) error           
+	UpdateOrangtua(nis string, req dto.UpdateOrangtuaRequest) error     
+}
+
+type siswaController struct {
+	db *gorm.DB
+}
+
+func NewSiswaController(db *gorm.DB) SiswaController {
+	return &siswaController{
+		db: db,
+	}
+}
+
+func (c *siswaController) GetAllSiswa() ([]dto.SiswaResponse, error) {
+	var siswaList []model.Siswa
+
+	err := c.db.Preload("Kelas").
+		Preload("Satelit").
+		Preload("Orangtua").
+		Preload("Lampiran").
+		Find(&siswaList).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	var responses []dto.SiswaResponse
+	for _, siswa := range siswaList {
+		responses = append(responses, dto.SiswaResponse{
+			SiswaID:       siswa.SiswaID,
+			SiswaNIS:      siswa.SiswaNIS,
+			SiswaNISN:     siswa.SiswaNISN,
+			SiswaNama:     siswa.SiswaNama,
+			NoIjazah:      siswa.NoIjazah,
+			SiswaJenkel:   siswa.SiswaJenkel,
+			SiswaTempat:   siswa.SiswaTempat,
+			SiswaTglLahir: siswa.SiswaTglLahir,
+			SiswaAlamat:   siswa.SiswaAlamat,
+			SiswaEmail:    siswa.SiswaEmail,
+			SiswaNoTelp:   siswa.SiswaNoTelp,
+			SiswaDokumen:  siswa.SiswaDokumen,
+			TglKeluar:     siswa.TglKeluar,
+			TglLulus:      siswa.TglLulus,
+			AnakKe:        siswa.AnakKe,
+			SiswaKelasID:  siswa.SiswaKelasID,
+			SoftDeleted:   siswa.SoftDeleted,
+			Kelas:         siswa.Kelas,
+			Satelit:       siswa.Satelit,
+			Orangtua:      siswa.Orangtua,
+			Lampiran:      siswa.Lampiran,
+		})
+	}
+
+	return responses, nil
+}
+
+// CreateSiswa membuat siswa + user + orangtua dalam 1 transaksi
+func (c *siswaController) CreateSiswa(req dto.CreateSiswaRequest) error {
+	fmt.Println("🚀 MASUK CONTROLLER")
+
+	tx := c.db.Begin()
+
+	// ======================
+	// 1. CEK & BUAT USER SISWA
+	// ======================
+	if req.SiswaNIS == "" {
+		tx.Rollback()
+		return fmt.Errorf("NIS wajib diisi")
+	}
+
+	email := req.SiswaNIS + "@siswa.sch.id"
+	
+	// Cek apakah user sudah ada
+	var existingUser model.User
+	if err := tx.Where("email = ?", email).First(&existingUser).Error; err == nil {
+		tx.Rollback()
+		return fmt.Errorf("user dengan NIS %s sudah terdaftar", req.SiswaNIS)
+	}
+
+	// Hash password (default = NIS)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.SiswaNIS), bcrypt.DefaultCost)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Buat User
+	user := model.User{
+		Email:    email,
+		Password: string(hashedPassword),
+		Name:     req.SiswaNama,
+		Role:     "siswa",
+	}
+
+	if err := tx.Create(&user).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	fmt.Printf("✅ USER CREATED: %s | Password default: %s\n", email, req.SiswaNIS)
+
+	// ======================
+	// 2. INSERT SISWA (gunakan helper converter)
+	// ======================
+	zero := 0
+	bogor := 1 // ID Satelit Bogor (default)
+	siswa := model.Siswa{
+		SiswaNIS:      &req.SiswaNIS,
+		SiswaNISN:     &req.SiswaNISN,
+		SiswaNama:     &req.SiswaNama,
+		SatelitID:&bogor, // default ke Satelit Bogor
+		SiswaJenkel:   &req.SiswaJenkel,
+		SiswaTempat:   &req.SiswaTempat,
+		SiswaTglLahir: &req.SiswaTglLahir,
+		SiswaAlamat:   &req.SiswaAlamat,
+		SiswaEmail:    &req.SiswaEmail,
+		SiswaNoTelp:   &req.SiswaNoTelp,
+		SiswaNIK:      &req.SiswaNIK,
+		SekolahAsal:   &req.SekolahAsal,
+		SiswaKewarganegaraan: &req.SiswaKewarganegaraan,
+		SiswaAgamaID:  helper.StringToIntPtr(req.SiswaAgamaID), // ← pakai helper
+		SiswaKelasID:  helper.StringToIntPtr(req.SiswaKelasID), // ← pakai helper
+		AnakKe:        helper.StringToIntPtr(req.AnakKe),       // ← pakai helper
+		NoIjazah:      &req.NoIjazah,
+		UserID:        &user.ID,
+		SoftDeleted:   &zero,
+	}
+
+	if err := tx.Create(&siswa).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	fmt.Println("✅ SISWA INSERTED")
+
+	// ======================
+	// 3. INSERT ORANGTUA (OPTIONAL)
+	// ======================
+	ortu := req.Orangtua
+
+	if ortu.AyahNama != nil || ortu.NoTelpAyah != nil {
+		fmt.Println("👨‍👩‍👧 INSERT ORTU")
+
+		ortuModel := model.Orangtua{
+			SiswaNIS:   &req.SiswaNIS,
+			AyahNama:   ortu.AyahNama,
+			AyahNotelp: ortu.NoTelpAyah,
+			AyahNik:    ortu.AyahNik,
+			IbuNama:    ortu.IbuNama,
+			IbuNotelp:  ortu.NoTelpIbu,
+			IbuNik:     ortu.IbuNik,
+			WaliNama:   ortu.WaliNama,
+			WaliNotelp: ortu.WaliNotelp,
+			WaliAlamat: ortu.WaliAlamat,
+			WaliNik:    ortu.WaliNik,
+
+		}
+
+		if err := tx.Create(&ortuModel).Error; err != nil {
+			fmt.Println("❌ GAGAL INSERT ORTU:", err)
+			tx.Rollback()
+			return err
+		}
+		fmt.Println("✅ ORANGTUA INSERTED")
+	} else {
+		fmt.Println("⏭️ SKIP INSERT ORTU (kosong)")
+	}
+
+	return tx.Commit().Error
+}
+func (c *siswaController) UpdateSiswa(nis string, req dto.UpdateSiswaRequest) error {
+	fmt.Println("🚀 UPDATE SISWA:", nis)
+
+	tx := c.db.Begin()
+
+	// Cari siswa berdasarkan NIS
+	var siswa model.Siswa
+	if err := tx.Where("siswa_nis = ?", nis).First(&siswa).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("siswa dengan NIS %s tidak ditemukan", nis)
+	}
+
+	// Update field yang dikirim (partial update)
+	updates := make(map[string]interface{})
+
+	if req.SiswaNama != nil {
+		updates["siswa_nama"] = *req.SiswaNama
+	}
+	if req.SiswaNISN != nil {
+		updates["siswa_nisn"] = *req.SiswaNISN
+	}
+	if req.SiswaJenkel != nil {
+		updates["siswa_jenkel"] = *req.SiswaJenkel
+	}
+	if req.NoIjazah != nil {
+		updates["no_ijazah"] = *req.NoIjazah
+	}
+	if req.SiswaTempat != nil {
+		updates["siswa_tempat"] = *req.SiswaTempat
+	}
+	if req.SiswaTglLahir != nil {
+		updates["siswa_tgl_lahir"] = *req.SiswaTglLahir
+	}
+	if req.SiswaAlamat != nil {
+		updates["siswa_alamat"] = *req.SiswaAlamat
+	}
+	if req.SiswaEmail != nil {
+		updates["siswa_email"] = *req.SiswaEmail
+	}
+	if req.SiswaNoTelp != nil {
+		updates["siswa_no_telp"] = *req.SiswaNoTelp
+	}
+	if req.AnakKe != nil {
+		updates["anak_ke"] = *req.AnakKe
+	}
+	if req.SiswaKelasID != nil {
+		updates["siswa_kelas_id"] = *req.SiswaKelasID
+	}
+
+	if len(updates) == 0 {
+		tx.Rollback()
+		return fmt.Errorf("tidak ada data yang akan diupdate")
+	}
+
+	if err := tx.Model(&siswa).Updates(updates).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	fmt.Printf("✅ SISWA UPDATED: %s\n", nis)
+
+	return tx.Commit().Error
+}
+// UpdateOrangtua untuk update data orangtua berdasarkan NIS siswa
+func (c *siswaController) UpdateOrangtua(nis string, req dto.UpdateOrangtuaRequest) error {
+	fmt.Println("🚀 UPDATE ORANGTUA untuk siswa:", nis)
+
+	tx := c.db.Begin()
+
+	// Cek apakah siswa ada
+	var siswa model.Siswa
+	if err := tx.Where("siswa_nis = ?", nis).First(&siswa).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("siswa dengan NIS %s tidak ditemukan", nis)
+	}
+
+	// Cari atau buat data orangtua
+	var orangtua model.Orangtua
+	err := tx.Where("siswa_nis = ?", nis).First(&orangtua).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// Buat data orangtua baru jika belum ada
+			orangtua = model.Orangtua{
+				SiswaNIS: &nis,
+			}
+			if err := tx.Create(&orangtua).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+		} else {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	// Update field yang dikirim (partial update)
+	updates := make(map[string]interface{})
+
+	if req.AyahNama != nil {
+		updates["ayah_nama"] = *req.AyahNama
+	}
+	if req.AyahNik != nil {
+		updates["ayah_nik"] = *req.AyahNik
+	}
+	if req.AyahTempat != nil {
+		updates["ayah_tempat"] = *req.AyahTempat
+	}
+	if req.AyahTanggal != nil {
+		updates["ayah_tanggal"] = *req.AyahTanggal
+	}
+	if req.AyahPendidikan != nil {
+		updates["ayah_pendidikan"] = *req.AyahPendidikan
+	}
+	if req.AyahPekerjaan != nil {
+		updates["ayah_pekerjaan"] = *req.AyahPekerjaan
+	}
+	if req.AyahPenghasilan != nil {
+		updates["ayah_penghasilan"] = *req.AyahPenghasilan
+	}
+	if req.NoTelpAyah != nil {
+		updates["ayah_notelp"] = *req.NoTelpAyah
+	}
+	if req.EmailAyah != nil {
+		updates["email_ayah"] = *req.EmailAyah
+	}
+
+	if req.IbuNama != nil {
+		updates["ibu_nama"] = *req.IbuNama
+	}
+	if req.IbuNik != nil {
+		updates["ibu_nik"] = *req.IbuNik
+	}
+	if req.IbuTempat != nil {
+		updates["ibu_tempat"] = *req.IbuTempat
+	}
+	if req.IbuTanggal != nil {
+		updates["ibu_tanggal"] = *req.IbuTanggal
+	}
+	if req.IbuPendidikan != nil {
+		updates["ibu_pendidikan"] = *req.IbuPendidikan
+	}
+	if req.IbuPekerjaan != nil {
+		updates["ibu_pekerjaan"] = *req.IbuPekerjaan
+	}
+	if req.IbuPenghasilan != nil {
+		updates["ibu_penghasilan"] = *req.IbuPenghasilan
+	}
+	if req.NoTelpIbu != nil {
+		updates["ibu_notelp"] = *req.NoTelpIbu
+	}
+	if req.EmailIbu != nil {
+		updates["email_ibu"] = *req.EmailIbu
+	}
+
+	if req.WaliNama != nil {
+		updates["wali_nama"] = *req.WaliNama
+	}
+	if req.WaliNik != nil {
+		updates["wali_nik"] = *req.WaliNik
+	}
+	if req.WaliTempat != nil {
+		updates["wali_tempat"] = *req.WaliTempat
+	}
+	if req.WaliTanggal != nil {
+		updates["wali_tanggal"] = *req.WaliTanggal
+	}
+	if req.WaliPendidikan != nil {
+		updates["wali_pendidikan"] = *req.WaliPendidikan
+	}
+	if req.WaliPekerjaan != nil {
+		updates["wali_pekerjaan"] = *req.WaliPekerjaan
+	}
+	if req.WaliPenghasilan != nil {
+		updates["wali_penghasilan"] = *req.WaliPenghasilan
+	}
+	if req.WaliAlamat != nil {
+		updates["wali_alamat"] = *req.WaliAlamat
+	}
+	if req.WaliNotelp != nil {
+		updates["wali_notelp"] = *req.WaliNotelp
+	}
+
+	if len(updates) == 0 {
+		tx.Rollback()
+		return fmt.Errorf("tidak ada data orangtua yang akan diupdate")
+	}
+
+	if err := tx.Model(&orangtua).Updates(updates).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	fmt.Printf("✅ ORANGTUA UPDATED untuk siswa: %s\n", nis)
+
+	return tx.Commit().Error
+}

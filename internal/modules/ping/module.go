@@ -9,15 +9,17 @@ import (
 )
 
 func Register(rg *gin.RouterGroup, _ *gorm.DB, _ *config.Config) {
-    pingHandler := handler.NewPingHandler()
+	pingHandler := handler.NewPingHandler()
 
-    rg.GET("/ping", pingHandler.Ping)
+	rg.GET("/ping", pingHandler.Ping)
 
-//     rg.GET("/__whoami", func(c *gin.Context) {
-//     c.JSON(200, gin.H{"ok": true})
-// })
+	//     rg.GET("/__whoami", func(c *gin.Context) {
+	//     c.JSON(200, gin.H{"ok": true})
+	// })
 
-// rg.GET("/__whoami/", func(c *gin.Context) {
-//     c.JSON(200, gin.H{"ok": true})
-// })
+	// rg.GET("/__whoami/", func(c *gin.Context) {
+	//     c.JSON(200, gin.H{"ok": true})
+	// })
 }
+
+// internal/routes/routes.go atau di module lampiran

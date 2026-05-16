@@ -17,6 +17,7 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 	lampiran := rg.Group("/lampiran")
 	lampiran.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	{
+
 		lampiran.GET("/:nis", h.GetByNIS)
 
 		// Upload via backend (multipart/form-data)

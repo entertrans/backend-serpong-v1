@@ -9,9 +9,11 @@ import (
 
 	"github.com/entertrans/go-base-project.git/internal/config"
 	authmodule "github.com/entertrans/go-base-project.git/internal/modules/auth"
+	avatarmodule "github.com/entertrans/go-base-project.git/internal/modules/avatar"
 	lampiranmodule "github.com/entertrans/go-base-project.git/internal/modules/lampiran"
 	masterdatamodule "github.com/entertrans/go-base-project.git/internal/modules/masterdata"
 	pingmodule "github.com/entertrans/go-base-project.git/internal/modules/ping"
+	rapor "github.com/entertrans/go-base-project.git/internal/modules/rapor"
 	siswamodule "github.com/entertrans/go-base-project.git/internal/modules/siswa"
 	"github.com/entertrans/go-base-project.git/internal/router"
 	"github.com/entertrans/go-base-project.git/pkg/database"
@@ -47,6 +49,8 @@ func main() {
 		siswamodule.Register,
 		masterdatamodule.Register,
 		lampiranmodule.Register,
+		avatarmodule.Register,
+		rapor.Register,
 		// kelasmodule.Register,
 	)
 
