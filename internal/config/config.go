@@ -23,15 +23,6 @@ type Config struct {
 	DBName      string
 	JWTSecret   string
 	StoragePath string
-	// Google Drive OAuth
-	// GDriveOAuthClientID     string
-	// GDriveOAuthClientSecret string
-	// GDriveTokenPath         string
-	// GDriveFolderID          string
-
-	// 	GDriveCredentialsPath string
-	// GDriveFolderID        string
-
 }
 
 // Tambahkan DB sebagai field global
