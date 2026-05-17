@@ -7,11 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/entertrans/go-base-project.git/internal/config"
-	"github.com/entertrans/go-base-project.git/internal/controller/siswa"
-	"github.com/entertrans/go-base-project.git/internal/handler"
-	"github.com/entertrans/go-base-project.git/internal/middleware"
-
+	"github.com/entertrans/backend-bogor.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/controller/siswa"
+	"github.com/entertrans/backend-bogor.git/internal/handler"
+	"github.com/entertrans/backend-bogor.git/internal/middleware"
 )
 
 func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
@@ -22,9 +21,10 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 	siswa.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	{
 		siswa.GET("/", siswaHandler.GetAllSiswa)
+		siswa.GET("/by-kelas", siswaHandler.GetSiswaByKelas)
 		siswa.POST("/", siswaHandler.CreateSiswa)
-		siswa.PATCH("/:nis", siswaHandler.UpdateSiswa)           
-		siswa.PATCH("/:nis/orangtua", siswaHandler.UpdateOrangtua) 
+		siswa.PATCH("/:nis", siswaHandler.UpdateSiswa)
+		siswa.PATCH("/:nis/orangtua", siswaHandler.UpdateOrangtua)
 		// Contoh kalau nanti mau tambah route:
 		// siswa.GET("/:nis", siswaHandler.GetSiswaByNIS)
 	}

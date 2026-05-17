@@ -1,0 +1,471 @@
+package handler
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+)
+
+type FinanceHandler interface {
+	// Fee Templates
+	GetAllFeeTemplates(c *gin.Context)
+	GetFeeTemplateByID(c *gin.Context)
+	CreateFeeTemplate(c *gin.Context)
+	UpdateFeeTemplate(c *gin.Context)
+	DeleteFeeTemplate(c *gin.Context)
+
+	// Invoices
+	GetAllInvoices(c *gin.Context)
+	GetInvoiceByID(c *gin.Context)
+	CreateInvoice(c *gin.Context)
+	UpdateInvoice(c *gin.Context)
+	DeleteInvoice(c *gin.Context)
+	PublishInvoice(c *gin.Context)
+	CancelInvoice(c *gin.Context)
+	AddInvoiceItem(c *gin.Context)
+	UpdateInvoiceItem(c *gin.Context)
+	RemoveInvoiceItem(c *gin.Context)
+	AddInvoiceAdjustment(c *gin.Context)
+	UpdateInvoiceAdjustment(c *gin.Context)
+	RemoveInvoiceAdjustment(c *gin.Context)
+
+	// Payments
+	GetAllPayments(c *gin.Context)
+	GetPaymentByID(c *gin.Context)
+	CreatePayment(c *gin.Context)
+	DeletePayment(c *gin.Context)
+}
+
+type financeHandler struct {
+	financeController controller.FinanceController
+}
+
+func NewFinanceHandler(financeController controller.FinanceController) FinanceHandler {
+	return &financeHandler{financeController: financeController}
+}
+
+// ==================== FEE TEMPLATES ====================
+
+func (h *financeHandler) GetAllFeeTemplates(c *gin.Context) {
+	isActiveStr := c.Query("is_active")
+	var isActive *int8
+	if isActiveStr != "" {
+		val, err := strconv.ParseInt(isActiveStr, 10, 8)
+		if err == nil {
+			active := int8(val)
+			isActive = &active
+		}
+	}
+
+	result, err := h.financeController.GetAllFeeTemplates(isActive)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) GetFeeTemplateByID(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	result, err := h.financeController.GetFeeTemplateByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) CreateFeeTemplate(c *gin.Context) {
+	var req dto.FeeTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.CreateFeeTemplate(&req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+func (h *financeHandler) UpdateFeeTemplate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var req dto.FeeTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.UpdateFeeTemplate(id, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) DeleteFeeTemplate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	err = h.financeController.DeleteFeeTemplate(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "fee template deleted successfully"})
+}
+
+// ==================== INVOICES ====================
+
+func (h *financeHandler) GetAllInvoices(c *gin.Context) {
+	status := c.Query("status")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	result, total, err := h.financeController.GetAllInvoices(status, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+func (h *financeHandler) GetInvoiceByID(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	result, err := h.financeController.GetInvoiceByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) CreateInvoice(c *gin.Context) {
+	var req struct {
+		Invoice     dto.InvoiceRequest             `json:"invoice" binding:"required"`
+		Items       []dto.InvoiceItemRequest       `json:"items" binding:"required,min=1"`
+		Adjustments []dto.InvoiceAdjustmentRequest `json:"adjustments"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get user ID from context (set by auth middleware)
+	createdBy, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	result, err := h.financeController.CreateInvoice(&req.Invoice, req.Items, req.Adjustments, createdBy.(uint64))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+func (h *financeHandler) UpdateInvoice(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var req dto.InvoiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.UpdateInvoice(id, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) DeleteInvoice(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	err = h.financeController.DeleteInvoice(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "invoice deleted successfully"})
+}
+
+func (h *financeHandler) PublishInvoice(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	err = h.financeController.PublishInvoice(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "invoice published successfully"})
+}
+
+func (h *financeHandler) CancelInvoice(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	err = h.financeController.CancelInvoice(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "invoice cancelled successfully"})
+}
+
+// Invoice Items
+func (h *financeHandler) AddInvoiceItem(c *gin.Context) {
+	invoiceID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid invoice id"})
+		return
+	}
+
+	var req dto.InvoiceItemRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.AddInvoiceItem(invoiceID, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+func (h *financeHandler) UpdateInvoiceItem(c *gin.Context) {
+	itemID, err := strconv.ParseUint(c.Param("itemId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid item id"})
+		return
+	}
+
+	var req dto.InvoiceItemRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.UpdateInvoiceItem(itemID, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) RemoveInvoiceItem(c *gin.Context) {
+	itemID, err := strconv.ParseUint(c.Param("itemId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid item id"})
+		return
+	}
+
+	err = h.financeController.RemoveInvoiceItem(itemID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "invoice item removed successfully"})
+}
+
+// Invoice Adjustments
+func (h *financeHandler) AddInvoiceAdjustment(c *gin.Context) {
+	invoiceID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid invoice id"})
+		return
+	}
+
+	var req dto.InvoiceAdjustmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.AddInvoiceAdjustment(invoiceID, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+func (h *financeHandler) UpdateInvoiceAdjustment(c *gin.Context) {
+	adjustmentID, err := strconv.ParseUint(c.Param("adjustmentId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid adjustment id"})
+		return
+	}
+
+	var req dto.InvoiceAdjustmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.financeController.UpdateInvoiceAdjustment(adjustmentID, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) RemoveInvoiceAdjustment(c *gin.Context) {
+	adjustmentID, err := strconv.ParseUint(c.Param("adjustmentId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid adjustment id"})
+		return
+	}
+
+	err = h.financeController.RemoveInvoiceAdjustment(adjustmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "invoice adjustment removed successfully"})
+}
+
+// ==================== PAYMENTS ====================
+
+func (h *financeHandler) GetAllPayments(c *gin.Context) {
+	siswaNIS := c.Query("siswa_nis")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	result, total, err := h.financeController.GetAllPayments(siswaNIS, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+func (h *financeHandler) GetPaymentByID(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	result, err := h.financeController.GetPaymentByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *financeHandler) CreatePayment(c *gin.Context) {
+	siswaNIS := c.Param("siswaNis")
+	if siswaNIS == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "siswa_nis is required"})
+		return
+	}
+
+	var req dto.PaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get user ID from context
+	createdBy, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	result, err := h.financeController.CreatePayment(siswaNIS, &req, createdBy.(uint64))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+func (h *financeHandler) DeletePayment(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	err = h.financeController.DeletePayment(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "payment deleted successfully"})
+}

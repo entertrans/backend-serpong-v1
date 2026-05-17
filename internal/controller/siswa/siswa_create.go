@@ -6,9 +6,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
-	"github.com/entertrans/go-base-project.git/internal/dto"
-	"github.com/entertrans/go-base-project.git/internal/helper"
-	"github.com/entertrans/go-base-project.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/helper"
+	"github.com/entertrans/backend-bogor.git/internal/model"
 )
 
 // CreateSiswa membuat siswa + user + orangtua dalam 1 transaksi
@@ -26,7 +26,7 @@ func (c *siswaController) CreateSiswa(req dto.CreateSiswaRequest) error {
 	}
 
 	email := req.SiswaNIS + "@siswa.sch.id"
-	
+
 	// Cek apakah user sudah ada
 	var existingUser model.User
 	if err := tx.Where("email = ?", email).First(&existingUser).Error; err == nil {
@@ -61,27 +61,27 @@ func (c *siswaController) CreateSiswa(req dto.CreateSiswaRequest) error {
 	// ======================
 	zero := 0
 	bogor := 1 // ID Satelit Bogor (default)
-	
+
 	siswa := model.Siswa{
-		SiswaNIS:      &req.SiswaNIS,
-		SiswaNISN:     &req.SiswaNISN,
-		SiswaNama:     &req.SiswaNama,
-		SatelitID:     &bogor,
-		SiswaJenkel:   &req.SiswaJenkel,
-		SiswaTempat:   &req.SiswaTempat,
-		SiswaTglLahir: &req.SiswaTglLahir,
-		SiswaAlamat:   &req.SiswaAlamat,
-		SiswaEmail:    &req.SiswaEmail,
-		SiswaNoTelp:   &req.SiswaNoTelp,
-		SiswaNIK:      &req.SiswaNIK,
-		SekolahAsal:   &req.SekolahAsal,
+		SiswaNIS:             &req.SiswaNIS,
+		SiswaNISN:            &req.SiswaNISN,
+		SiswaNama:            &req.SiswaNama,
+		SatelitID:            &bogor,
+		SiswaJenkel:          &req.SiswaJenkel,
+		SiswaTempat:          &req.SiswaTempat,
+		SiswaTglLahir:        &req.SiswaTglLahir,
+		SiswaAlamat:          &req.SiswaAlamat,
+		SiswaEmail:           &req.SiswaEmail,
+		SiswaNoTelp:          &req.SiswaNoTelp,
+		SiswaNIK:             &req.SiswaNIK,
+		SekolahAsal:          &req.SekolahAsal,
 		SiswaKewarganegaraan: &req.SiswaKewarganegaraan,
-		SiswaAgamaID:  helper.StringToIntPtr(req.SiswaAgamaID),
-		SiswaKelasID:  helper.StringToIntPtr(req.SiswaKelasID),
-		AnakKe:        helper.StringToIntPtr(req.AnakKe),
-		NoIjazah:      &req.NoIjazah,
-		UserID:        &user.ID,
-		SoftDeleted:   &zero,
+		SiswaAgamaID:         helper.StringToIntPtr(req.SiswaAgamaID),
+		SiswaKelasID:         helper.StringToIntPtr(req.SiswaKelasID),
+		AnakKe:               helper.StringToIntPtr(req.AnakKe),
+		NoIjazah:             &req.NoIjazah,
+		UserID:               &user.ID,
+		SoftDeleted:          &zero,
 	}
 
 	if err := tx.Create(&siswa).Error; err != nil {
@@ -129,7 +129,7 @@ func (c *siswaController) createOrangtua(tx *gorm.DB, nis string, ortu dto.Orang
 		fmt.Println("❌ GAGAL INSERT ORTU:", err)
 		return err
 	}
-	
+
 	fmt.Println("✅ ORANGTUA INSERTED")
 	return nil
 }

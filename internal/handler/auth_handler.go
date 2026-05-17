@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/entertrans/go-base-project.git/internal/controller"
-	"github.com/entertrans/go-base-project.git/pkg/response"
+	"github.com/entertrans/backend-bogor.git/internal/controller"
+	"github.com/entertrans/backend-bogor.git/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

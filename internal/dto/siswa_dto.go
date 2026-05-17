@@ -1,6 +1,6 @@
 package dto
 
-import "github.com/entertrans/go-base-project.git/internal/model"
+import "github.com/entertrans/backend-bogor.git/internal/model"
 
 type SiswaResponse struct {
 	SiswaID       uint               `json:"siswa_id"`
@@ -69,4 +69,26 @@ type UpdateOrangtuaRequest struct {
 	WaliPenghasilan *string `json:"wali_penghasilan,omitempty"`
 	WaliAlamat      *string `json:"wali_alamat,omitempty"`
 	WaliNotelp      *string `json:"wali_notelp,omitempty"`
+}
+
+// FilterSiswaRequest untuk request filter siswa
+type FilterSiswaRequest struct {
+	KelasID int    `form:"kelas_id" binding:"required"`
+	Search  string `form:"search"`
+	Page    int    `form:"page"`
+	Limit   int    `form:"limit"`
+}
+
+// PaginationResponse untuk response pagination
+type PaginationResponse struct {
+	Page       int   `json:"page"`
+	Limit      int   `json:"limit"`
+	Total      int64 `json:"total"`
+	TotalPages int   `json:"total_pages"`
+}
+
+// SiswaListResponse untuk response list siswa dengan pagination
+type SiswaListResponse struct {
+	Data       []SiswaResponse    `json:"data"`
+	Pagination PaginationResponse `json:"pagination"`
 }

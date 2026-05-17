@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/entertrans/go-base-project.git/pkg/response"
+	"github.com/entertrans/backend-bogor.git/pkg/response"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -39,7 +39,9 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			userID := uint(claims["user_id"].(float64))
-			c.Set("userID", userID)
+			// Gunakan kedua key untuk kompatibilitas
+			c.Set("userID", userID)  // untuk auth handler
+			c.Set("user_id", userID) // untuk finance handler (TAMBAHKAN INI!)
 		} else {
 			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid token claims")
 			c.Abort()

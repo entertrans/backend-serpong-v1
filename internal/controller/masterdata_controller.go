@@ -3,8 +3,8 @@ package controller
 import (
 	"gorm.io/gorm"
 
-	"github.com/entertrans/go-base-project.git/internal/dto"
-	"github.com/entertrans/go-base-project.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
 )
 
 type MasterdataController interface {

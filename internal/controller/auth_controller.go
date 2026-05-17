@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"github.com/entertrans/go-base-project.git/internal/dto"
-	"github.com/entertrans/go-base-project.git/internal/service"
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/service"
 )
 
 type AuthController interface {

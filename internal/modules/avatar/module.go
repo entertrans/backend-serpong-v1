@@ -5,8 +5,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/entertrans/go-base-project.git/internal/config"
-	"github.com/entertrans/go-base-project.git/internal/handler"
+	"github.com/entertrans/backend-bogor.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/handler"
 )
 
 func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {

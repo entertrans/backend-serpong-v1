@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/entertrans/go-base-project.git/internal/controller"
+	"github.com/entertrans/backend-bogor.git/internal/controller"
 )
 
 type MasterdataHandler interface {

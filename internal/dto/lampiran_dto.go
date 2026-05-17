@@ -3,7 +3,7 @@ package dto
 import (
 	"time"
 
-	"github.com/entertrans/go-base-project.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/model"
 )
 
 type LampiranResponse struct {

@@ -4,7 +4,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/entertrans/go-base-project.git/internal/controller"
+	"github.com/entertrans/backend-bogor.git/internal/controller"
 	"github.com/gin-gonic/gin"
 )
 

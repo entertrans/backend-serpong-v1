@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/entertrans/go-base-project.git/pkg/response"
+	"github.com/entertrans/backend-bogor.git/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

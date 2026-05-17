@@ -1,0 +1,1076 @@
+package controller
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+type FinanceController interface {
+	// Fee Templates
+	GetAllFeeTemplates(isActive *int8) ([]dto.FeeTemplateResponse, error)
+	GetFeeTemplateByID(id uint64) (*dto.FeeTemplateResponse, error)
+	CreateFeeTemplate(req *dto.FeeTemplateRequest) (*dto.FeeTemplateResponse, error)
+	UpdateFeeTemplate(id uint64, req *dto.FeeTemplateRequest) (*dto.FeeTemplateResponse, error)
+	DeleteFeeTemplate(id uint64) error
+
+	// Invoices
+	GetAllInvoices(status string, page, limit int) ([]dto.InvoiceListItem, int64, error)
+	GetInvoiceByID(id uint64) (*dto.InvoiceResponse, error)
+	CreateInvoice(req *dto.InvoiceRequest, items []dto.InvoiceItemRequest, adjustments []dto.InvoiceAdjustmentRequest, createdBy uint64) (*dto.InvoiceResponse, error)
+	UpdateInvoice(id uint64, req *dto.InvoiceRequest) (*dto.InvoiceResponse, error)
+	DeleteInvoice(id uint64) error
+	PublishInvoice(id uint64) error
+	CancelInvoice(id uint64) error
+	AddInvoiceItem(invoiceID uint64, req *dto.InvoiceItemRequest) (*dto.InvoiceItemResponse, error)
+	UpdateInvoiceItem(itemID uint64, req *dto.InvoiceItemRequest) (*dto.InvoiceItemResponse, error)
+	RemoveInvoiceItem(itemID uint64) error
+	AddInvoiceAdjustment(invoiceID uint64, req *dto.InvoiceAdjustmentRequest) (*dto.InvoiceAdjustmentResponse, error)
+	UpdateInvoiceAdjustment(adjustmentID uint64, req *dto.InvoiceAdjustmentRequest) (*dto.InvoiceAdjustmentResponse, error)
+	RemoveInvoiceAdjustment(adjustmentID uint64) error
+
+	// Payments
+	GetAllPayments(siswaNIS string, page, limit int) ([]dto.PaymentListItem, int64, error)
+	GetPaymentByID(id uint64) (*dto.PaymentDetailResponse, error)
+	CreatePayment(siswaNIS string, req *dto.PaymentRequest, createdBy uint64) (*dto.PaymentResponse, error)
+	DeletePayment(id uint64) error
+}
+
+type financeController struct {
+	db *gorm.DB
+}
+
+func NewFinanceController(db *gorm.DB) FinanceController {
+	return &financeController{db: db}
+}
+
+// ==================== FEE TEMPLATES ====================
+
+func (c *financeController) GetAllFeeTemplates(isActive *int8) ([]dto.FeeTemplateResponse, error) {
+	var templates []model.FinanceFeeTemplate
+	query := c.db.Order("fee_template_id ASC")
+
+	if isActive != nil {
+		query = query.Where("is_active = ?", *isActive)
+	}
+
+	err := query.Find(&templates).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]dto.FeeTemplateResponse, len(templates))
+	for i, t := range templates {
+		result[i] = dto.FeeTemplateResponse{
+			FeeTemplateID: t.FeeTemplateID,
+			FeeCode:       t.FeeCode,
+			FeeName:       t.FeeName,
+			DefaultAmount: t.DefaultAmount,
+			Description:   t.Description,
+			IsActive:      t.IsActive,
+			CreatedAt:     t.CreatedAt,
+			UpdatedAt:     t.UpdatedAt,
+		}
+	}
+	return result, nil
+}
+
+func (c *financeController) GetFeeTemplateByID(id uint64) (*dto.FeeTemplateResponse, error) {
+	var template model.FinanceFeeTemplate
+	err := c.db.First(&template, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("fee template not found")
+		}
+		return nil, err
+	}
+
+	return &dto.FeeTemplateResponse{
+		FeeTemplateID: template.FeeTemplateID,
+		FeeCode:       template.FeeCode,
+		FeeName:       template.FeeName,
+		DefaultAmount: template.DefaultAmount,
+		Description:   template.Description,
+		IsActive:      template.IsActive,
+		CreatedAt:     template.CreatedAt,
+		UpdatedAt:     template.UpdatedAt,
+	}, nil
+}
+
+func (c *financeController) CreateFeeTemplate(req *dto.FeeTemplateRequest) (*dto.FeeTemplateResponse, error) {
+	isActive := int8(1)
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
+	template := model.FinanceFeeTemplate{
+		FeeCode:       req.FeeCode,
+		FeeName:       req.FeeName,
+		DefaultAmount: req.DefaultAmount,
+		Description:   req.Description,
+		IsActive:      isActive,
+	}
+
+	err := c.db.Create(&template).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return c.GetFeeTemplateByID(template.FeeTemplateID)
+}
+
+func (c *financeController) UpdateFeeTemplate(id uint64, req *dto.FeeTemplateRequest) (*dto.FeeTemplateResponse, error) {
+	var template model.FinanceFeeTemplate
+	err := c.db.First(&template, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("fee template not found")
+		}
+		return nil, err
+	}
+
+	updates := map[string]interface{}{}
+	if req.FeeCode != nil {
+		updates["fee_code"] = req.FeeCode
+	}
+	if req.FeeName != "" {
+		updates["fee_name"] = req.FeeName
+	}
+	if req.DefaultAmount != 0 {
+		updates["default_amount"] = req.DefaultAmount
+	}
+	if req.Description != nil {
+		updates["description"] = req.Description
+	}
+	if req.IsActive != nil {
+		updates["is_active"] = *req.IsActive
+	}
+
+	err = c.db.Model(&template).Updates(updates).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return c.GetFeeTemplateByID(id)
+}
+
+func (c *financeController) DeleteFeeTemplate(id uint64) error {
+	// Check if template is used in any invoice items
+	var count int64
+	c.db.Model(&model.FinanceInvoiceItem{}).Where("fee_template_id = ?", id).Count(&count)
+	if count > 0 {
+		return errors.New("cannot delete fee template because it is used in existing invoices")
+	}
+
+	return c.db.Delete(&model.FinanceFeeTemplate{}, id).Error
+}
+
+// ==================== INVOICES ====================
+
+func (c *financeController) GetAllInvoices(status string, page, limit int) ([]dto.InvoiceListItem, int64, error) {
+	var invoices []model.FinanceInvoice
+	var total int64
+
+	query := c.db.Model(&model.FinanceInvoice{})
+
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	if limit > 0 {
+		query = query.Offset(offset).Limit(limit)
+	}
+
+	err := query.Order("invoice_id DESC").Find(&invoices).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]dto.InvoiceListItem, len(invoices))
+	for i, inv := range invoices {
+		// Get totals and student count
+		var studentCount int64
+		c.db.Model(&model.FinanceInvoiceItem{}).Where("invoice_id = ?", inv.InvoiceID).Distinct("siswa_nis").Count(&studentCount)
+
+		totals, _ := c.calculateInvoiceTotals(inv.InvoiceID)
+
+		result[i] = dto.InvoiceListItem{
+			InvoiceID:       inv.InvoiceID,
+			InvoiceNo:       inv.InvoiceNo,
+			IssueDate:       inv.IssueDate,
+			DueDate:         inv.DueDate,
+			Description:     inv.Description,
+			Status:          inv.Status,
+			TotalGrandTotal: totals.GrandTotal,
+			TotalPaid:       totals.PaidTotal,
+			TotalRemaining:  totals.GrandTotal - totals.PaidTotal,
+			StudentCount:    int(studentCount),
+			CreatedAt:       inv.CreatedAt,
+		}
+	}
+
+	return result, total, nil
+}
+
+type invoiceTotals struct {
+	Subtotal    float64
+	Adjustments float64
+	GrandTotal  float64
+	PaidTotal   float64
+}
+
+func (c *financeController) calculateInvoiceTotals(invoiceID uint64) (*invoiceTotals, error) {
+	var subtotal float64
+	c.db.Model(&model.FinanceInvoiceItem{}).Where("invoice_id = ?", invoiceID).Select("COALESCE(SUM(subtotal), 0)").Scan(&subtotal)
+
+	var adjustments float64
+	c.db.Model(&model.FinanceInvoiceAdjustment{}).Where("invoice_id = ?", invoiceID).Select("COALESCE(SUM(amount), 0)").Scan(&adjustments)
+
+	grandTotal := subtotal + adjustments
+
+	var paidTotal float64
+	c.db.Model(&model.FinancePaymentAllocation{}).Where("invoice_id = ?", invoiceID).Select("COALESCE(SUM(amount), 0)").Scan(&paidTotal)
+
+	return &invoiceTotals{
+		Subtotal:    subtotal,
+		Adjustments: adjustments,
+		GrandTotal:  grandTotal,
+		PaidTotal:   paidTotal,
+	}, nil
+}
+
+func (c *financeController) getStudentInfo(nis string) (nama string, kelas string, err error) {
+	var siswa model.Siswa
+	err = c.db.Preload("Kelas").Where("siswa_nis = ?", nis).First(&siswa).Error
+	if err != nil {
+		return "", "", err
+	}
+
+	nama = ""
+	if siswa.SiswaNama != nil {
+		nama = *siswa.SiswaNama
+	}
+
+	kelas = ""
+	if siswa.Kelas.KelasNama != nil {
+		kelas = *siswa.Kelas.KelasNama
+	}
+
+	return nama, kelas, nil
+}
+
+func (c *financeController) GetInvoiceByID(id uint64) (*dto.InvoiceResponse, error) {
+	var invoice model.FinanceInvoice
+	err := c.db.Preload("Items").Preload("Adjustments").First(&invoice, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("invoice not found")
+		}
+		return nil, err
+	}
+
+	// Get all allocations for this invoice
+	var allocations []model.FinancePaymentAllocation
+	c.db.Where("invoice_id = ?", id).Find(&allocations)
+
+	// Group items and adjustments by siswa_nis
+	studentMap := make(map[string]*dto.StudentInvoiceDetail)
+
+	for _, item := range invoice.Items {
+		student, exists := studentMap[item.SiswaNIS]
+		if !exists {
+			siswaNama, kelas, _ := c.getStudentInfo(item.SiswaNIS)
+			student = &dto.StudentInvoiceDetail{
+				SiswaNIS:        item.SiswaNIS,
+				SiswaNama:       siswaNama,
+				Kelas:           kelas,
+				Items:           []dto.InvoiceItemResponse{},
+				Adjustments:     []dto.InvoiceAdjustmentResponse{},
+				Payments:        []dto.PaymentAllocationResponse{},
+				Subtotal:        0,
+				AdjustmentTotal: 0,
+				GrandTotal:      0,
+				PaidTotal:       0,
+			}
+			studentMap[item.SiswaNIS] = student
+		}
+
+		// Get fee template if exists
+		var feeTemplate *dto.FeeTemplateResponse
+		if item.FeeTemplateID != nil {
+			if ft, err := c.GetFeeTemplateByID(*item.FeeTemplateID); err == nil {
+				feeTemplate = ft
+			}
+		}
+
+		student.Items = append(student.Items, dto.InvoiceItemResponse{
+			InvoiceItemID: item.InvoiceItemID,
+			SiswaNIS:      item.SiswaNIS,
+			ItemName:      item.ItemName,
+			Description:   item.Description,
+			Qty:           item.Qty,
+			UnitPrice:     item.UnitPrice,
+			Subtotal:      item.Subtotal,
+			SortOrder:     item.SortOrder,
+			FeeTemplate:   feeTemplate,
+		})
+		student.Subtotal += item.Subtotal
+	}
+
+	for _, adj := range invoice.Adjustments {
+		student, exists := studentMap[adj.SiswaNIS]
+		if !exists {
+			siswaNama, kelas, _ := c.getStudentInfo(adj.SiswaNIS)
+			student = &dto.StudentInvoiceDetail{
+				SiswaNIS:        adj.SiswaNIS,
+				SiswaNama:       siswaNama,
+				Kelas:           kelas,
+				Items:           []dto.InvoiceItemResponse{},
+				Adjustments:     []dto.InvoiceAdjustmentResponse{},
+				Payments:        []dto.PaymentAllocationResponse{},
+				Subtotal:        0,
+				AdjustmentTotal: 0,
+				GrandTotal:      0,
+				PaidTotal:       0,
+			}
+			studentMap[adj.SiswaNIS] = student
+		}
+
+		student.Adjustments = append(student.Adjustments, dto.InvoiceAdjustmentResponse{
+			AdjustmentID:   adj.AdjustmentID,
+			SiswaNIS:       adj.SiswaNIS,
+			AdjustmentType: adj.AdjustmentType,
+			AdjustmentName: adj.AdjustmentName,
+			Amount:         adj.Amount,
+			Notes:          adj.Notes,
+			CreatedAt:      adj.CreatedAt,
+		})
+		student.AdjustmentTotal += adj.Amount
+	}
+
+	// Calculate payments per student
+	for _, alloc := range allocations {
+		student, exists := studentMap[alloc.SiswaNIS]
+		if exists {
+			student.Payments = append(student.Payments, dto.PaymentAllocationResponse{
+				AllocationID: alloc.AllocationID,
+				PaymentID:    alloc.PaymentID,
+				InvoiceID:    alloc.InvoiceID,
+				Amount:       alloc.Amount,
+				CreatedAt:    alloc.CreatedAt,
+			})
+			student.PaidTotal += alloc.Amount
+		}
+	}
+
+	// Calculate grand totals and status for each student
+	students := make([]dto.StudentInvoiceDetail, 0, len(studentMap))
+	var totalSubtotal, totalAdjustment, totalGrandTotal, totalPaid float64
+
+	for _, student := range studentMap {
+		student.GrandTotal = student.Subtotal + student.AdjustmentTotal
+		student.RemainingAmount = student.GrandTotal - student.PaidTotal
+
+		if student.PaidTotal >= student.GrandTotal && student.GrandTotal > 0 {
+			student.Status = "paid"
+		} else if student.PaidTotal > 0 {
+			student.Status = "partial"
+		} else {
+			student.Status = "unpaid"
+		}
+
+		totalSubtotal += student.Subtotal
+		totalAdjustment += student.AdjustmentTotal
+		totalGrandTotal += student.GrandTotal
+		totalPaid += student.PaidTotal
+
+		students = append(students, *student)
+	}
+
+	// Get invoice_no for allocations
+	for i := range allocations {
+		var inv model.FinanceInvoice
+		c.db.Select("invoice_no").First(&inv, allocations[i].InvoiceID)
+	}
+
+	return &dto.InvoiceResponse{
+		InvoiceID:       invoice.InvoiceID,
+		InvoiceNo:       invoice.InvoiceNo,
+		IssueDate:       invoice.IssueDate,
+		DueDate:         invoice.DueDate,
+		Description:     invoice.Description,
+		Status:          invoice.Status,
+		CreatedBy:       invoice.CreatedBy,
+		CreatedAt:       invoice.CreatedAt,
+		UpdatedAt:       invoice.UpdatedAt,
+		TotalSubtotal:   totalSubtotal,
+		TotalAdjustment: totalAdjustment,
+		TotalGrandTotal: totalGrandTotal,
+		TotalPaid:       totalPaid,
+		TotalRemaining:  totalGrandTotal - totalPaid,
+		Students:        students,
+	}, nil
+}
+
+func (c *financeController) generateInvoiceNo() (string, error) {
+	var lastInvoice model.FinanceInvoice
+	var lastNumber int = 0
+
+	err := c.db.Order("invoice_id DESC").First(&lastInvoice).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	if lastInvoice.InvoiceNo != "" {
+		fmt.Sscanf(lastInvoice.InvoiceNo, "INV/%d/%04d", &lastNumber)
+	}
+
+	year := time.Now().Year()
+	lastNumber++
+
+	return fmt.Sprintf("INV/%d/%04d", year, lastNumber), nil
+}
+
+func (c *financeController) CreateInvoice(req *dto.InvoiceRequest, items []dto.InvoiceItemRequest, adjustments []dto.InvoiceAdjustmentRequest, createdBy uint64) (*dto.InvoiceResponse, error) {
+	invoiceNo, err := c.generateInvoiceNo()
+	if err != nil {
+		return nil, err
+	}
+
+	issueDate, err := time.Parse("2006-01-02", req.IssueDate)
+	if err != nil {
+		return nil, errors.New("invalid issue_date format, use YYYY-MM-DD")
+	}
+
+	var dueDate *time.Time
+	if req.DueDate != nil {
+		parsed, err := time.Parse("2006-01-02", *req.DueDate)
+		if err != nil {
+			return nil, errors.New("invalid due_date format, use YYYY-MM-DD")
+		}
+		dueDate = &parsed
+	}
+
+	status := "draft"
+	if req.Status != "" {
+		status = req.Status
+	}
+
+	invoice := model.FinanceInvoice{
+		InvoiceNo:   invoiceNo,
+		IssueDate:   issueDate,
+		DueDate:     dueDate,
+		Description: req.Description,
+		Status:      status,
+		CreatedBy:   &createdBy,
+	}
+
+	err = c.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&invoice).Error; err != nil {
+			return err
+		}
+
+		// Create items
+		for _, itemReq := range items {
+			subtotal := itemReq.Qty * itemReq.UnitPrice
+			item := model.FinanceInvoiceItem{
+				InvoiceID:     invoice.InvoiceID,
+				SiswaNIS:      itemReq.SiswaNIS,
+				FeeTemplateID: itemReq.FeeTemplateID,
+				ItemName:      itemReq.ItemName,
+				Description:   itemReq.Description,
+				Qty:           itemReq.Qty,
+				UnitPrice:     itemReq.UnitPrice,
+				Subtotal:      subtotal,
+				SortOrder:     itemReq.SortOrder,
+			}
+			if err := tx.Create(&item).Error; err != nil {
+				return err
+			}
+		}
+
+		// Create adjustments
+		for _, adjReq := range adjustments {
+			adj := model.FinanceInvoiceAdjustment{
+				InvoiceID:      invoice.InvoiceID,
+				SiswaNIS:       adjReq.SiswaNIS,
+				AdjustmentType: adjReq.AdjustmentType,
+				AdjustmentName: adjReq.AdjustmentName,
+				Amount:         adjReq.Amount,
+				Notes:          adjReq.Notes,
+			}
+			if adjReq.AdjustmentType == "" {
+				adj.AdjustmentType = "other"
+			}
+			if err := tx.Create(&adj).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return c.GetInvoiceByID(invoice.InvoiceID)
+}
+
+func (c *financeController) UpdateInvoice(id uint64, req *dto.InvoiceRequest) (*dto.InvoiceResponse, error) {
+	var invoice model.FinanceInvoice
+	err := c.db.First(&invoice, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("invoice not found")
+		}
+		return nil, err
+	}
+
+	// Cannot update published or cancelled invoices
+	if invoice.Status == "published" || invoice.Status == "cancelled" {
+		return nil, errors.New("cannot update published or cancelled invoice")
+	}
+
+	updates := map[string]interface{}{}
+
+	if req.IssueDate != "" {
+		issueDate, err := time.Parse("2006-01-02", req.IssueDate)
+		if err != nil {
+			return nil, errors.New("invalid issue_date format")
+		}
+		updates["issue_date"] = issueDate
+	}
+
+	if req.DueDate != nil {
+		dueDate, err := time.Parse("2006-01-02", *req.DueDate)
+		if err != nil {
+			return nil, errors.New("invalid due_date format")
+		}
+		updates["due_date"] = dueDate
+	}
+
+	if req.Description != nil {
+		updates["description"] = req.Description
+	}
+
+	if req.Status != "" {
+		updates["status"] = req.Status
+	}
+
+	if len(updates) > 0 {
+		err = c.db.Model(&invoice).Updates(updates).Error
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return c.GetInvoiceByID(id)
+}
+
+func (c *financeController) DeleteInvoice(id uint64) error {
+	var invoice model.FinanceInvoice
+	err := c.db.First(&invoice, id).Error
+	if err != nil {
+		return err
+	}
+
+	// Check if there are any payments allocated to this invoice
+	var allocationCount int64
+	c.db.Model(&model.FinancePaymentAllocation{}).Where("invoice_id = ?", id).Count(&allocationCount)
+	if allocationCount > 0 {
+		return errors.New("cannot delete invoice with existing payments")
+	}
+
+	return c.db.Delete(&invoice).Error
+}
+
+func (c *financeController) PublishInvoice(id uint64) error {
+	var invoice model.FinanceInvoice
+	err := c.db.First(&invoice, id).Error
+	if err != nil {
+		return err
+	}
+
+	if invoice.Status != "draft" {
+		return errors.New("only draft invoices can be published")
+	}
+
+	return c.db.Model(&invoice).Update("status", "published").Error
+}
+
+func (c *financeController) CancelInvoice(id uint64) error {
+	var invoice model.FinanceInvoice
+	err := c.db.First(&invoice, id).Error
+	if err != nil {
+		return err
+	}
+
+	if invoice.Status == "cancelled" {
+		return errors.New("invoice already cancelled")
+	}
+
+	// Check if there are payments
+	var allocationCount int64
+	c.db.Model(&model.FinancePaymentAllocation{}).Where("invoice_id = ?", id).Count(&allocationCount)
+	if allocationCount > 0 {
+		return errors.New("cannot cancel invoice with existing payments")
+	}
+
+	return c.db.Model(&invoice).Update("status", "cancelled").Error
+}
+
+func (c *financeController) AddInvoiceItem(invoiceID uint64, req *dto.InvoiceItemRequest) (*dto.InvoiceItemResponse, error) {
+	var invoice model.FinanceInvoice
+	err := c.db.First(&invoice, invoiceID).Error
+	if err != nil {
+		return nil, errors.New("invoice not found")
+	}
+
+	if invoice.Status != "draft" {
+		return nil, errors.New("can only add items to draft invoices")
+	}
+
+	subtotal := req.Qty * req.UnitPrice
+	item := model.FinanceInvoiceItem{
+		InvoiceID:     invoiceID,
+		SiswaNIS:      req.SiswaNIS,
+		FeeTemplateID: req.FeeTemplateID,
+		ItemName:      req.ItemName,
+		Description:   req.Description,
+		Qty:           req.Qty,
+		UnitPrice:     req.UnitPrice,
+		Subtotal:      subtotal,
+		SortOrder:     req.SortOrder,
+	}
+
+	err = c.db.Create(&item).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get fee template if exists
+	var feeTemplate *dto.FeeTemplateResponse
+	if req.FeeTemplateID != nil {
+		if ft, err := c.GetFeeTemplateByID(*req.FeeTemplateID); err == nil {
+			feeTemplate = ft
+		}
+	}
+
+	return &dto.InvoiceItemResponse{
+		InvoiceItemID: item.InvoiceItemID,
+		SiswaNIS:      item.SiswaNIS,
+		ItemName:      item.ItemName,
+		Description:   item.Description,
+		Qty:           item.Qty,
+		UnitPrice:     item.UnitPrice,
+		Subtotal:      item.Subtotal,
+		SortOrder:     item.SortOrder,
+		FeeTemplate:   feeTemplate,
+	}, nil
+}
+
+func (c *financeController) UpdateInvoiceItem(itemID uint64, req *dto.InvoiceItemRequest) (*dto.InvoiceItemResponse, error) {
+	var item model.FinanceInvoiceItem
+	err := c.db.First(&item, itemID).Error
+	if err != nil {
+		return nil, errors.New("item not found")
+	}
+
+	var invoice model.FinanceInvoice
+	c.db.First(&invoice, item.InvoiceID)
+	if invoice.Status != "draft" {
+		return nil, errors.New("can only update items in draft invoices")
+	}
+
+	subtotal := req.Qty * req.UnitPrice
+	updates := map[string]interface{}{
+		"siswa_nis":       req.SiswaNIS,
+		"fee_template_id": req.FeeTemplateID,
+		"item_name":       req.ItemName,
+		"description":     req.Description,
+		"qty":             req.Qty,
+		"unit_price":      req.UnitPrice,
+		"subtotal":        subtotal,
+		"sort_order":      req.SortOrder,
+	}
+
+	err = c.db.Model(&item).Updates(updates).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Reload item
+	c.db.First(&item, itemID)
+
+	var feeTemplate *dto.FeeTemplateResponse
+	if item.FeeTemplateID != nil {
+		if ft, err := c.GetFeeTemplateByID(*item.FeeTemplateID); err == nil {
+			feeTemplate = ft
+		}
+	}
+
+	return &dto.InvoiceItemResponse{
+		InvoiceItemID: item.InvoiceItemID,
+		SiswaNIS:      item.SiswaNIS,
+		ItemName:      item.ItemName,
+		Description:   item.Description,
+		Qty:           item.Qty,
+		UnitPrice:     item.UnitPrice,
+		Subtotal:      item.Subtotal,
+		SortOrder:     item.SortOrder,
+		FeeTemplate:   feeTemplate,
+	}, nil
+}
+
+func (c *financeController) RemoveInvoiceItem(itemID uint64) error {
+	var item model.FinanceInvoiceItem
+	err := c.db.First(&item, itemID).Error
+	if err != nil {
+		return err
+	}
+
+	var invoice model.FinanceInvoice
+	c.db.First(&invoice, item.InvoiceID)
+	if invoice.Status != "draft" {
+		return errors.New("can only remove items from draft invoices")
+	}
+
+	return c.db.Delete(&item).Error
+}
+
+func (c *financeController) AddInvoiceAdjustment(invoiceID uint64, req *dto.InvoiceAdjustmentRequest) (*dto.InvoiceAdjustmentResponse, error) {
+	var invoice model.FinanceInvoice
+	err := c.db.First(&invoice, invoiceID).Error
+	if err != nil {
+		return nil, errors.New("invoice not found")
+	}
+
+	if invoice.Status != "draft" {
+		return nil, errors.New("can only add adjustments to draft invoices")
+	}
+
+	adjType := req.AdjustmentType
+	if adjType == "" {
+		adjType = "other"
+	}
+
+	adjustment := model.FinanceInvoiceAdjustment{
+		InvoiceID:      invoiceID,
+		SiswaNIS:       req.SiswaNIS,
+		AdjustmentType: adjType,
+		AdjustmentName: req.AdjustmentName,
+		Amount:         req.Amount,
+		Notes:          req.Notes,
+	}
+
+	err = c.db.Create(&adjustment).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.InvoiceAdjustmentResponse{
+		AdjustmentID:   adjustment.AdjustmentID,
+		SiswaNIS:       adjustment.SiswaNIS,
+		AdjustmentType: adjustment.AdjustmentType,
+		AdjustmentName: adjustment.AdjustmentName,
+		Amount:         adjustment.Amount,
+		Notes:          adjustment.Notes,
+		CreatedAt:      adjustment.CreatedAt,
+	}, nil
+}
+
+func (c *financeController) UpdateInvoiceAdjustment(adjustmentID uint64, req *dto.InvoiceAdjustmentRequest) (*dto.InvoiceAdjustmentResponse, error) {
+	var adjustment model.FinanceInvoiceAdjustment
+	err := c.db.First(&adjustment, adjustmentID).Error
+	if err != nil {
+		return nil, errors.New("adjustment not found")
+	}
+
+	var invoice model.FinanceInvoice
+	c.db.First(&invoice, adjustment.InvoiceID)
+	if invoice.Status != "draft" {
+		return nil, errors.New("can only update adjustments in draft invoices")
+	}
+
+	adjType := req.AdjustmentType
+	if adjType == "" {
+		adjType = "other"
+	}
+
+	updates := map[string]interface{}{
+		"siswa_nis":       req.SiswaNIS,
+		"adjustment_type": adjType,
+		"adjustment_name": req.AdjustmentName,
+		"amount":          req.Amount,
+		"notes":           req.Notes,
+	}
+
+	err = c.db.Model(&adjustment).Updates(updates).Error
+	if err != nil {
+		return nil, err
+	}
+
+	c.db.First(&adjustment, adjustmentID)
+
+	return &dto.InvoiceAdjustmentResponse{
+		AdjustmentID:   adjustment.AdjustmentID,
+		SiswaNIS:       adjustment.SiswaNIS,
+		AdjustmentType: adjustment.AdjustmentType,
+		AdjustmentName: adjustment.AdjustmentName,
+		Amount:         adjustment.Amount,
+		Notes:          adjustment.Notes,
+		CreatedAt:      adjustment.CreatedAt,
+	}, nil
+}
+
+func (c *financeController) RemoveInvoiceAdjustment(adjustmentID uint64) error {
+	var adjustment model.FinanceInvoiceAdjustment
+	err := c.db.First(&adjustment, adjustmentID).Error
+	if err != nil {
+		return err
+	}
+
+	var invoice model.FinanceInvoice
+	c.db.First(&invoice, adjustment.InvoiceID)
+	if invoice.Status != "draft" {
+		return errors.New("can only remove adjustments from draft invoices")
+	}
+
+	return c.db.Delete(&adjustment).Error
+}
+
+// ==================== PAYMENTS ====================
+
+func (c *financeController) generatePaymentNo() (string, error) {
+	var lastPayment model.FinancePayment
+	var lastNumber int = 0
+
+	err := c.db.Order("payment_id DESC").First(&lastPayment).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	if lastPayment.PaymentNo != "" {
+		fmt.Sscanf(lastPayment.PaymentNo, "PAY/%d/%06d", &lastNumber)
+	}
+
+	year := time.Now().Year()
+	lastNumber++
+
+	return fmt.Sprintf("PAY/%d/%06d", year, lastNumber), nil
+}
+
+func (c *financeController) GetAllPayments(siswaNIS string, page, limit int) ([]dto.PaymentListItem, int64, error) {
+	var payments []model.FinancePayment
+	var total int64
+
+	query := c.db.Model(&model.FinancePayment{})
+
+	if siswaNIS != "" {
+		query = query.Where("siswa_nis = ?", siswaNIS)
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	if limit > 0 {
+		query = query.Offset(offset).Limit(limit)
+	}
+
+	err := query.Order("payment_id DESC").Find(&payments).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]dto.PaymentListItem, len(payments))
+	for i, p := range payments {
+		siswaNama := ""
+		var siswa model.Siswa
+		if err := c.db.Where("siswa_nis = ?", p.SiswaNIS).First(&siswa).Error; err == nil && siswa.SiswaNama != nil {
+			siswaNama = *siswa.SiswaNama
+		}
+
+		result[i] = dto.PaymentListItem{
+			PaymentID:     p.PaymentID,
+			PaymentNo:     p.PaymentNo,
+			SiswaNIS:      p.SiswaNIS,
+			SiswaNama:     siswaNama,
+			PaymentDate:   p.PaymentDate,
+			PaymentMethod: p.PaymentMethod,
+			TotalAmount:   p.TotalAmount,
+			Notes:         p.Notes,
+			CreatedAt:     p.CreatedAt,
+		}
+	}
+
+	return result, total, nil
+}
+
+func (c *financeController) GetPaymentByID(id uint64) (*dto.PaymentDetailResponse, error) {
+	var payment model.FinancePayment
+	err := c.db.Preload("Allocations").First(&payment, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("payment not found")
+		}
+		return nil, err
+	}
+
+	siswaNama := ""
+	var siswa model.Siswa
+	if err := c.db.Where("siswa_nis = ?", payment.SiswaNIS).First(&siswa).Error; err == nil && siswa.SiswaNama != nil {
+		siswaNama = *siswa.SiswaNama
+	}
+
+	allocations := make([]dto.PaymentAllocationResponse, len(payment.Allocations))
+	invoiceDetails := make([]struct {
+		InvoiceID       uint64  `json:"invoice_id"`
+		InvoiceNo       string  `json:"invoice_no"`
+		AllocatedAmount float64 `json:"allocated_amount"`
+		InvoiceTotal    float64 `json:"invoice_total"`
+	}, len(payment.Allocations))
+
+	for i, alloc := range payment.Allocations {
+		var invoice model.FinanceInvoice
+		c.db.First(&invoice, alloc.InvoiceID)
+
+		totals, _ := c.calculateInvoiceTotals(alloc.InvoiceID)
+
+		allocations[i] = dto.PaymentAllocationResponse{
+			AllocationID: alloc.AllocationID,
+			PaymentID:    alloc.PaymentID,
+			InvoiceID:    alloc.InvoiceID,
+			InvoiceNo:    invoice.InvoiceNo,
+			Amount:       alloc.Amount,
+			CreatedAt:    alloc.CreatedAt,
+		}
+
+		invoiceDetails[i] = struct {
+			InvoiceID       uint64  `json:"invoice_id"`
+			InvoiceNo       string  `json:"invoice_no"`
+			AllocatedAmount float64 `json:"allocated_amount"`
+			InvoiceTotal    float64 `json:"invoice_total"`
+		}{
+			InvoiceID:       alloc.InvoiceID,
+			InvoiceNo:       invoice.InvoiceNo,
+			AllocatedAmount: alloc.Amount,
+			InvoiceTotal:    totals.GrandTotal,
+		}
+	}
+
+	return &dto.PaymentDetailResponse{
+		PaymentResponse: dto.PaymentResponse{
+			PaymentID:     payment.PaymentID,
+			PaymentNo:     payment.PaymentNo,
+			SiswaNIS:      payment.SiswaNIS,
+			SiswaNama:     siswaNama,
+			PaymentDate:   payment.PaymentDate,
+			PaymentMethod: payment.PaymentMethod,
+			TotalAmount:   payment.TotalAmount,
+			Notes:         payment.Notes,
+			CreatedBy:     payment.CreatedBy,
+			CreatedAt:     payment.CreatedAt,
+			Allocations:   allocations,
+		},
+		Invoices: invoiceDetails,
+	}, nil
+}
+
+func (c *financeController) CreatePayment(siswaNIS string, req *dto.PaymentRequest, createdBy uint64) (*dto.PaymentResponse, error) {
+	paymentNo, err := c.generatePaymentNo()
+	if err != nil {
+		return nil, err
+	}
+
+	paymentDate, err := time.Parse("2006-01-02", req.PaymentDate)
+	if err != nil {
+		return nil, errors.New("invalid payment_date format, use YYYY-MM-DD")
+	}
+
+	paymentMethod := req.PaymentMethod
+	if paymentMethod == "" {
+		paymentMethod = "cash"
+	}
+
+	payment := model.FinancePayment{
+		PaymentNo:     paymentNo,
+		SiswaNIS:      siswaNIS,
+		PaymentDate:   paymentDate,
+		PaymentMethod: paymentMethod,
+		TotalAmount:   req.TotalAmount,
+		Notes:         req.Notes,
+		CreatedBy:     &createdBy,
+	}
+
+	err = c.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&payment).Error; err != nil {
+			return err
+		}
+
+		// Create allocations
+		var totalAllocated float64
+		for _, allocReq := range req.Allocations {
+			// Verify invoice exists and belongs to the same student
+			var invoice model.FinanceInvoice
+			if err := tx.First(&invoice, allocReq.InvoiceID).Error; err != nil {
+				return errors.New("invoice not found")
+			}
+
+			// Check if invoice belongs to this student (has items for this student)
+			var itemCount int64
+			tx.Model(&model.FinanceInvoiceItem{}).Where("invoice_id = ? AND siswa_nis = ?", allocReq.InvoiceID, siswaNIS).Count(&itemCount)
+			if itemCount == 0 {
+				return errors.New("invoice does not belong to this student")
+			}
+
+			allocation := model.FinancePaymentAllocation{
+				PaymentID: payment.PaymentID,
+				InvoiceID: allocReq.InvoiceID,
+				SiswaNIS:  siswaNIS,
+				Amount:    allocReq.Amount,
+			}
+
+			if err := tx.Create(&allocation).Error; err != nil {
+				return err
+			}
+
+			totalAllocated += allocReq.Amount
+		}
+
+		// Verify total allocated matches payment amount
+		if totalAllocated != req.TotalAmount {
+			return errors.New("total allocated amount does not match payment amount")
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Get created payment
+	paymentResp, err := c.GetPaymentByID(payment.PaymentID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &paymentResp.PaymentResponse, nil
+}
+
+func (c *financeController) DeletePayment(id uint64) error {
+	var payment model.FinancePayment
+	err := c.db.First(&payment, id).Error
+	if err != nil {
+		return err
+	}
+
+	// Delete payment (allocations will be deleted due to ON DELETE CASCADE)
+	return c.db.Delete(&payment).Error
+}

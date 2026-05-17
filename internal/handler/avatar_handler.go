@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/entertrans/go-base-project.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/config"
 	"github.com/gin-gonic/gin"
 )
 

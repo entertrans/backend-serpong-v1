@@ -7,9 +7,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/entertrans/go-base-project.git/internal/config"
-	"github.com/entertrans/go-base-project.git/internal/model"
-	"github.com/entertrans/go-base-project.git/internal/repository"
+	"github.com/entertrans/backend-bogor.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/repository"
 )
 
 type AuthService interface {
@@ -88,28 +88,28 @@ func (s *authService) GenerateToken(userID uint) (string, error) {
 // CreateSiswaUser membuat user untuk siswa dengan default password = NIS
 func (s *authService) CreateSiswaUser(nis, name string) (*model.User, error) {
 	email := nis + "@siswa.sch.id"
-	
+
 	// Cek apakah user sudah ada
 	existingUser, err := s.repo.FindByEmail(email)
 	if err == nil && existingUser != nil {
 		return nil, errors.New("user dengan NIS ini sudah terdaftar")
 	}
-	
+
 	// Hash password (default = NIS)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(nis), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	user := &model.User{
 		Email:    email,
 		Password: string(hashedPassword),
 		Name:     name,
 	}
-	
+
 	if err := s.repo.Create(user); err != nil {
 		return nil, err
 	}
-	
+
 	return user, nil
 }

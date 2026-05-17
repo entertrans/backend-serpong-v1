@@ -7,17 +7,19 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"github.com/entertrans/go-base-project.git/internal/config"
-	authmodule "github.com/entertrans/go-base-project.git/internal/modules/auth"
-	avatarmodule "github.com/entertrans/go-base-project.git/internal/modules/avatar"
-	lampiranmodule "github.com/entertrans/go-base-project.git/internal/modules/lampiran"
-	masterdatamodule "github.com/entertrans/go-base-project.git/internal/modules/masterdata"
-	pingmodule "github.com/entertrans/go-base-project.git/internal/modules/ping"
-	rapor "github.com/entertrans/go-base-project.git/internal/modules/rapor"
-	siswamodule "github.com/entertrans/go-base-project.git/internal/modules/siswa"
-	"github.com/entertrans/go-base-project.git/internal/router"
-	"github.com/entertrans/go-base-project.git/pkg/database"
-	"github.com/entertrans/go-base-project.git/pkg/logger"
+	"github.com/entertrans/backend-bogor.git/internal/config"
+	authmodule "github.com/entertrans/backend-bogor.git/internal/modules/auth"
+	avatarmodule "github.com/entertrans/backend-bogor.git/internal/modules/avatar"
+
+	financemodule "github.com/entertrans/backend-bogor.git/internal/modules/finance"
+	lampiranmodule "github.com/entertrans/backend-bogor.git/internal/modules/lampiran"
+	masterdatamodule "github.com/entertrans/backend-bogor.git/internal/modules/masterdata"
+	pingmodule "github.com/entertrans/backend-bogor.git/internal/modules/ping"
+	rapor "github.com/entertrans/backend-bogor.git/internal/modules/rapor"
+	siswamodule "github.com/entertrans/backend-bogor.git/internal/modules/siswa"
+	"github.com/entertrans/backend-bogor.git/internal/router"
+	"github.com/entertrans/backend-bogor.git/pkg/database"
+	"github.com/entertrans/backend-bogor.git/pkg/logger"
 )
 
 func main() {
@@ -32,10 +34,18 @@ func main() {
 	r := gin.Default()
 
 	// CORS aman: jangan pakai cors.Default() untuk production
+	// r.Use(cors.New(cors.Config{
+	// 	AllowOrigins:     []string{"http://localhost:5173"},
+	// 	AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+	// 	AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+	// 	AllowCredentials: true,
+	// 	MaxAge:           12 * time.Hour,
+	// }))
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
@@ -51,6 +61,7 @@ func main() {
 		lampiranmodule.Register,
 		avatarmodule.Register,
 		rapor.Register,
+		financemodule.Register,
 		// kelasmodule.Register,
 	)
 

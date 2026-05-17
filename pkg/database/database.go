@@ -3,7 +3,7 @@ package database
 import (
 	"fmt"
 
-	"github.com/entertrans/go-base-project.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/config"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

@@ -3,9 +3,8 @@ package siswa
 import (
 	"fmt"
 
-	"github.com/entertrans/go-base-project.git/internal/dto"
-	"github.com/entertrans/go-base-project.git/internal/model"
-
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
 )
 
 // UpdateSiswa untuk update data siswa berdasarkan NIS
@@ -78,7 +77,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_nama"] = *req.SiswaNama
 		}
 	}
-	
+
 	if req.SiswaNISN != nil {
 		if *req.SiswaNISN == "" {
 			updates["siswa_nisn"] = nil
@@ -86,7 +85,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_nisn"] = *req.SiswaNISN
 		}
 	}
-	
+
 	if req.SiswaJenkel != nil {
 		if *req.SiswaJenkel == "" {
 			updates["siswa_jenkel"] = nil
@@ -94,7 +93,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_jenkel"] = *req.SiswaJenkel
 		}
 	}
-	
+
 	if req.NoIjazah != nil {
 		if *req.NoIjazah == "" {
 			updates["no_ijazah"] = nil
@@ -102,7 +101,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["no_ijazah"] = *req.NoIjazah
 		}
 	}
-	
+
 	if req.SiswaTempat != nil {
 		if *req.SiswaTempat == "" {
 			updates["siswa_tempat"] = nil
@@ -110,7 +109,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_tempat"] = *req.SiswaTempat
 		}
 	}
-	
+
 	if req.SiswaTglLahir != nil {
 		if *req.SiswaTglLahir == "" {
 			updates["siswa_tgl_lahir"] = nil
@@ -118,7 +117,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_tgl_lahir"] = *req.SiswaTglLahir
 		}
 	}
-	
+
 	if req.SiswaAlamat != nil {
 		if *req.SiswaAlamat == "" {
 			updates["siswa_alamat"] = nil
@@ -126,7 +125,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_alamat"] = *req.SiswaAlamat
 		}
 	}
-	
+
 	if req.SiswaEmail != nil {
 		if *req.SiswaEmail == "" {
 			updates["siswa_email"] = nil
@@ -134,7 +133,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_email"] = *req.SiswaEmail
 		}
 	}
-	
+
 	if req.SiswaNoTelp != nil {
 		if *req.SiswaNoTelp == "" {
 			updates["siswa_no_telp"] = nil
@@ -142,7 +141,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["siswa_no_telp"] = *req.SiswaNoTelp
 		}
 	}
-	
+
 	if req.AnakKe != nil {
 		// Untuk angka: jika 0, set ke NULL
 		if *req.AnakKe == 0 {
@@ -151,7 +150,7 @@ func (c *siswaController) buildSiswaUpdates(req dto.UpdateSiswaRequest) map[stri
 			updates["anak_ke"] = *req.AnakKe
 		}
 	}
-	
+
 	if req.SiswaKelasID != nil {
 		// Untuk ID: jika 0, set ke NULL
 		if *req.SiswaKelasID == 0 {
@@ -176,7 +175,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_nama"] = *req.AyahNama
 		}
 	}
-	
+
 	if req.AyahNik != nil {
 		if *req.AyahNik == "" {
 			updates["ayah_nik"] = nil
@@ -184,7 +183,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_nik"] = *req.AyahNik
 		}
 	}
-	
+
 	if req.AyahTempat != nil {
 		if *req.AyahTempat == "" {
 			updates["ayah_tempat"] = nil
@@ -192,7 +191,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_tempat"] = *req.AyahTempat
 		}
 	}
-	
+
 	if req.AyahTanggal != nil {
 		if *req.AyahTanggal == "" {
 			updates["ayah_tanggal"] = nil
@@ -200,7 +199,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_tanggal"] = *req.AyahTanggal
 		}
 	}
-	
+
 	if req.AyahPendidikan != nil {
 		if *req.AyahPendidikan == "" {
 			updates["ayah_pendidikan"] = nil
@@ -208,7 +207,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_pendidikan"] = *req.AyahPendidikan
 		}
 	}
-	
+
 	if req.AyahPekerjaan != nil {
 		if *req.AyahPekerjaan == "" {
 			updates["ayah_pekerjaan"] = nil
@@ -216,7 +215,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_pekerjaan"] = *req.AyahPekerjaan
 		}
 	}
-	
+
 	if req.AyahPenghasilan != nil {
 		if *req.AyahPenghasilan == "" {
 			updates["ayah_penghasilan"] = nil
@@ -224,7 +223,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ayah_penghasilan"] = *req.AyahPenghasilan
 		}
 	}
-	
+
 	if req.NoTelpAyah != nil {
 		if *req.NoTelpAyah == "" {
 			updates["no_telp_ayah"] = nil
@@ -232,7 +231,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["no_telp_ayah"] = *req.NoTelpAyah
 		}
 	}
-	
+
 	if req.EmailAyah != nil {
 		if *req.EmailAyah == "" {
 			updates["email_ayah"] = nil
@@ -249,7 +248,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_nama"] = *req.IbuNama
 		}
 	}
-	
+
 	if req.IbuNik != nil {
 		if *req.IbuNik == "" {
 			updates["ibu_nik"] = nil
@@ -257,7 +256,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_nik"] = *req.IbuNik
 		}
 	}
-	
+
 	if req.IbuTempat != nil {
 		if *req.IbuTempat == "" {
 			updates["ibu_tempat"] = nil
@@ -265,7 +264,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_tempat"] = *req.IbuTempat
 		}
 	}
-	
+
 	if req.IbuTanggal != nil {
 		if *req.IbuTanggal == "" {
 			updates["ibu_tanggal"] = nil
@@ -273,7 +272,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_tanggal"] = *req.IbuTanggal
 		}
 	}
-	
+
 	if req.IbuPendidikan != nil {
 		if *req.IbuPendidikan == "" {
 			updates["ibu_pendidikan"] = nil
@@ -281,7 +280,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_pendidikan"] = *req.IbuPendidikan
 		}
 	}
-	
+
 	if req.IbuPekerjaan != nil {
 		if *req.IbuPekerjaan == "" {
 			updates["ibu_pekerjaan"] = nil
@@ -289,7 +288,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_pekerjaan"] = *req.IbuPekerjaan
 		}
 	}
-	
+
 	if req.IbuPenghasilan != nil {
 		if *req.IbuPenghasilan == "" {
 			updates["ibu_penghasilan"] = nil
@@ -297,7 +296,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["ibu_penghasilan"] = *req.IbuPenghasilan
 		}
 	}
-	
+
 	if req.NoTelpIbu != nil {
 		if *req.NoTelpIbu == "" {
 			updates["no_telp_ibu"] = nil
@@ -305,7 +304,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["no_telp_ibu"] = *req.NoTelpIbu
 		}
 	}
-	
+
 	if req.EmailIbu != nil {
 		if *req.EmailIbu == "" {
 			updates["email_ibu"] = nil
@@ -322,7 +321,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_nama"] = *req.WaliNama
 		}
 	}
-	
+
 	if req.WaliNik != nil {
 		if *req.WaliNik == "" {
 			updates["wali_nik"] = nil
@@ -330,7 +329,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_nik"] = *req.WaliNik
 		}
 	}
-	
+
 	if req.WaliTempat != nil {
 		if *req.WaliTempat == "" {
 			updates["wali_tempat"] = nil
@@ -338,7 +337,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_tempat"] = *req.WaliTempat
 		}
 	}
-	
+
 	if req.WaliTanggal != nil {
 		if *req.WaliTanggal == "" {
 			updates["wali_tanggal"] = nil
@@ -346,7 +345,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_tanggal"] = *req.WaliTanggal
 		}
 	}
-	
+
 	if req.WaliPendidikan != nil {
 		if *req.WaliPendidikan == "" {
 			updates["wali_pendidikan"] = nil
@@ -354,7 +353,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_pendidikan"] = *req.WaliPendidikan
 		}
 	}
-	
+
 	if req.WaliPekerjaan != nil {
 		if *req.WaliPekerjaan == "" {
 			updates["wali_pekerjaan"] = nil
@@ -362,7 +361,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_pekerjaan"] = *req.WaliPekerjaan
 		}
 	}
-	
+
 	if req.WaliPenghasilan != nil {
 		if *req.WaliPenghasilan == "" {
 			updates["wali_penghasilan"] = nil
@@ -370,7 +369,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_penghasilan"] = *req.WaliPenghasilan
 		}
 	}
-	
+
 	if req.WaliAlamat != nil {
 		if *req.WaliAlamat == "" {
 			updates["wali_alamat"] = nil
@@ -378,7 +377,7 @@ func (c *siswaController) buildOrangtuaUpdates(req dto.UpdateOrangtuaRequest) ma
 			updates["wali_alamat"] = *req.WaliAlamat
 		}
 	}
-	
+
 	if req.WaliNotelp != nil {
 		if *req.WaliNotelp == "" {
 			updates["wali_notelp"] = nil

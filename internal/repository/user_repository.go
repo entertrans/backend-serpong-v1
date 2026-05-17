@@ -3,7 +3,7 @@ package repository
 import (
 	"gorm.io/gorm"
 
-	models "github.com/entertrans/go-base-project.git/internal/model"
+	models "github.com/entertrans/backend-bogor.git/internal/model"
 )
 
 type UserRepository interface {
