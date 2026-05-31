@@ -23,7 +23,7 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 
 	// ==================== ROUTES TAHUN AJARAN ====================
 	tahunAjaran := rg.Group("/tahun-ajaran")
-	tahunAjaran.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	tahunAjaran.Use(middleware.AuthMiddleware(cfg))
 	{
 		tahunAjaran.GET("/all", tahunAjaranHandler.GetAllTahunAjaranHandler)
 		tahunAjaran.POST("/create", tahunAjaranHandler.CreateTahunAjaranHandler)
@@ -32,20 +32,12 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 		tahunAjaran.PUT("/:ta_id/reactivate", tahunAjaranHandler.ReactivateTahunAjaranHandler) // NEW
 	}
 
-	// ==================== ROUTES MASTER DATA (untuk dropdown) ====================
-	master := rg.Group("/master")
-	master.Use(middleware.AuthMiddleware(cfg.JWTSecret))
-	{
-		// master.GET("/kelas/aktif", kurikulumHandler.GetKelasAktifHandler)
-		master.GET("/guru/aktif", kurikulumHandler.GetGuruAktifHandler)
-		master.GET("/mapel/aktif", kurikulumHandler.GetMapelAktifHandler)
-	}
-
 	// ==================== ROUTES KURIKULUM ====================
 	taKelasMapel := rg.Group("/ta-kelas-mapel")
-	taKelasMapel.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	taKelasMapel.Use(middleware.AuthMiddleware(cfg))
 	{
 		taKelasMapel.GET("/:ta_id/:kelas_id", kurikulumHandler.GetKurikulumByKelasHandler)
+		taKelasMapel.GET("/:ta_id/:kelas_id/:guru_id", kurikulumHandler.GetKurikulumByGuruHandler)
 		taKelasMapel.POST("/save", kurikulumHandler.SaveKurikulumHandler)
 		taKelasMapel.POST("/copy/:ta_id/:kelas_id", kurikulumHandler.CopyKurikulumHandler)
 		taKelasMapel.GET("/check/:ta_id", kurikulumHandler.CheckKurikulumStatusHandler)
@@ -53,7 +45,7 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 
 	// ==================== ROUTES PENILAIAN ====================
 	penilaian := rg.Group("/penilaian")
-	penilaian.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	penilaian.Use(middleware.AuthMiddleware(cfg))
 	{
 		// Siswa
 		penilaian.GET("/siswa/:ta_id/:kelas_id", penilaianHandler.GetSiswaByKelasHandler)

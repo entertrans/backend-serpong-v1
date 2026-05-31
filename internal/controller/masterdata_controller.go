@@ -12,6 +12,8 @@ type MasterdataController interface {
 	GetKelasAktif() ([]dto.KelasListItem, error)
 	GetKelasAlumni() ([]dto.KelasListItem, error)
 	GetSatelit() ([]dto.SatelitListItem, error)
+	GetGuruAktif() ([]dto.GuruAktifResponse, error)
+	GetMapelAktif() ([]dto.MapelAktifResponse, error)
 }
 
 type masterdataController struct {
@@ -96,4 +98,54 @@ func mapKelasList(kelasList []model.Kelas) []dto.KelasListItem {
 		})
 	}
 	return result
+}
+
+//new
+
+func (c *masterdataController) GetGuruAktif() ([]dto.GuruAktifResponse, error) {
+	var guruList []model.Guru
+
+	err := c.db.Where("status_aktif = ?", true).
+		Order("guru_nama ASC").
+		Find(&guruList).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]dto.GuruAktifResponse, len(guruList))
+	for i, g := range guruList {
+		guruNIP := ""
+		if g.GuruNIP != nil {
+			guruNIP = *g.GuruNIP
+		}
+		result[i] = dto.GuruAktifResponse{
+			GuruID:   g.GuruID,
+			GuruNama: g.GuruNama,
+			GuruNIP:  guruNIP,
+		}
+	}
+	return result, nil
+}
+
+func (c *masterdataController) GetMapelAktif() ([]dto.MapelAktifResponse, error) {
+	var mapelList []model.Mapel
+
+	err := c.db.Order("kd_mapel ASC").Find(&mapelList).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Ambil juga data kelompok dan jenjang dari tabel mapel
+	// Asumsi: tabel mapel sudah punya field kelompok dan jenjang
+	// Jika belum, bisa di-skip dulu atau join dengan tabel lain
+	result := make([]dto.MapelAktifResponse, len(mapelList))
+	for i, m := range mapelList {
+		result[i] = dto.MapelAktifResponse{
+			KdMapel: m.KdMapel,
+			NmMapel: m.NmMapel,
+			// Kelompok: m.Kelompok,
+			// Jenjang:  m.Jenjang,
+		}
+	}
+	return result, nil
 }

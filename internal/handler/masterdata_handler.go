@@ -13,6 +13,8 @@ type MasterdataHandler interface {
 	GetKelasAktif(c *gin.Context)
 	GetKelasAlumni(c *gin.Context)
 	GetSatelit(c *gin.Context)
+	GetGuruAktifHandler(c *gin.Context)
+	GetMapelAktifHandler(c *gin.Context)
 }
 
 type masterdataHandler struct {
@@ -52,6 +54,27 @@ func (h *masterdataHandler) GetKelasAlumni(c *gin.Context) {
 
 func (h *masterdataHandler) GetSatelit(c *gin.Context) {
 	result, err := h.masterController.GetSatelit()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// new
+// GetGuruAktifHandler - GET /master/guru/aktif
+func (h *masterdataHandler) GetGuruAktifHandler(c *gin.Context) {
+	result, err := h.masterController.GetGuruAktif()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// GetMapelAktifHandler - GET /master/mapel/aktif
+func (h *masterdataHandler) GetMapelAktifHandler(c *gin.Context) {
+	result, err := h.masterController.GetMapelAktif()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

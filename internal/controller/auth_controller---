@@ -1,4 +1,3 @@
-// internal/controller/auth_controller.go
 package controller
 
 import (
@@ -9,9 +8,9 @@ import (
 type AuthController interface {
 	Register(email, password, name string) (*dto.UserResponse, error)
 	Login(email, password string) (*dto.LoginResponse, error)
-	Profile(userID uint) (*dto.ProfileResponse, error) // UBAH RETURN TYPE
-	CreateSiswa(nis, name string) (*dto.UserResponse, error)
-	CreateGuru(nip, name, email string) (*dto.UserResponse, error)
+	Profile(userID uint) (*dto.UserResponse, error)
+	CreateSiswa(nis, name string) (*dto.UserResponse, error)       // TAMBAHKAN
+	CreateGuru(nip, name, email string) (*dto.UserResponse, error) // TAMBAHKAN
 }
 
 type authController struct {
@@ -59,20 +58,20 @@ func (c *authController) Login(email, password string) (*dto.LoginResponse, erro
 
 // internal/controller/auth_controller.go
 
-// func (c *authController) Profile(userID uint) (*dto.UserResponse, error) {
-// 	user, err := c.authService.GetUserByID(userID)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func (c *authController) Profile(userID uint) (*dto.UserResponse, error) {
+	user, err := c.authService.GetUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
 
-// 	return &dto.UserResponse{
-// 		ID:        user.ID,
-// 		Email:     user.Email,
-// 		Name:      user.Name,
-// 		Role:      user.Role, // <-- TAMBAHKAN INI
-// 		CreatedAt: user.CreatedAt,
-// 	}, nil
-// }
+	return &dto.UserResponse{
+		ID:        user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		Role:      user.Role, // <-- TAMBAHKAN INI
+		CreatedAt: user.CreatedAt,
+	}, nil
+}
 
 func (c *authController) CreateSiswa(nis, name string) (*dto.UserResponse, error) {
 	user, err := c.authService.CreateSiswaUser(nis, name)
@@ -102,13 +101,4 @@ func (c *authController) CreateGuru(nip, name, email string) (*dto.UserResponse,
 		Role:      user.Role, // <-- TAMBAHKAN INI
 		CreatedAt: user.CreatedAt,
 	}, nil
-}
-
-// UPDATE Profile method
-func (c *authController) Profile(userID uint) (*dto.ProfileResponse, error) {
-	profile, err := c.authService.GetUserProfile(userID)
-	if err != nil {
-		return nil, err
-	}
-	return profile, nil
 }

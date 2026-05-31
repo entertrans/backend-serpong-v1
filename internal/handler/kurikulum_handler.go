@@ -20,28 +20,6 @@ func NewKurikulumHandler(kurikulumController controller.KurikulumController) *Ku
 	}
 }
 
-// ==================== GET DATA UNTUK DROPDOWN ====================
-
-// GetGuruAktifHandler - GET /master/guru/aktif
-func (h *KurikulumHandler) GetGuruAktifHandler(c *gin.Context) {
-	result, err := h.kurikulumController.GetGuruAktif()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
-// GetMapelAktifHandler - GET /master/mapel/aktif
-func (h *KurikulumHandler) GetMapelAktifHandler(c *gin.Context) {
-	result, err := h.kurikulumController.GetMapelAktif()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
 // ==================== KURIKULUM SETUP ====================
 
 // GetKurikulumByKelasHandler - GET /ta-kelas-mapel/:ta_id/:kelas_id
@@ -119,6 +97,34 @@ func (h *KurikulumHandler) CheckKurikulumStatusHandler(c *gin.Context) {
 	}
 
 	result, err := h.kurikulumController.CheckKurikulumStatus(uint(taID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// GetKurikulumByGuruHandler - GET /ta-kelas-mapel/:ta_id/:kelas_id/:guru_id
+func (h *KurikulumHandler) GetKurikulumByGuruHandler(c *gin.Context) {
+	taID, err := strconv.ParseUint(c.Param("ta_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ta_id"})
+		return
+	}
+
+	kelasID, err := strconv.ParseUint(c.Param("kelas_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid kelas_id"})
+		return
+	}
+
+	guruID, err := strconv.ParseUint(c.Param("guru_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid guru_id"})
+		return
+	}
+
+	result, err := h.kurikulumController.GetKurikulumByGuru(uint(taID), uint(kelasID), uint(guruID))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

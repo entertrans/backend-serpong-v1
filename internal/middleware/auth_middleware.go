@@ -1,52 +1,114 @@
+// internal/middleware/jwt_middleware.go
 package middleware
 
 import (
 	"net/http"
 	"strings"
 
+	"github.com/entertrans/backend-bogor.git/internal/config"
 	"github.com/entertrans/backend-bogor.git/pkg/response"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
+// AuthMiddleware menerima config
+func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			response.SendErrorResponse(c, http.StatusUnauthorized, "Authorization header is required")
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Authorization header required")
 			c.Abort()
 			return
 		}
 
-		parts := strings.Split(authHeader, " ")
+		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid authorization header format")
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid authorization format")
 			c.Abort()
 			return
 		}
 
 		tokenString := parts[1]
+		claims := jwt.MapClaims{}
 
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return []byte(jwtSecret), nil
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return []byte(cfg.JWTSecret), nil
 		})
 
 		if err != nil || !token.Valid {
-			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid token")
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid or expired token")
 			c.Abort()
 			return
 		}
 
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			userID := uint(claims["user_id"].(float64))
-			// Gunakan kedua key untuk kompatibilitas
-			c.Set("userID", userID)  // untuk auth handler
-			c.Set("user_id", userID) // untuk finance handler (TAMBAHKAN INI!)
-		} else {
-			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid token claims")
+		// Extract userID dan role dari claims
+		userID, ok := claims["user_id"]
+		if !ok {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "User ID not found in token")
 			c.Abort()
 			return
 		}
+
+		role, ok := claims["role"]
+		if !ok {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Role not found in token")
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", userID)
+		c.Set("userRole", role)
+
+		c.Next()
+	}
+}
+
+// AuthMiddlewareWithSecret - VERSI LAMA untuk kompatibilitas (jika dibutuhkan)
+func AuthMiddlewareWithSecret(secret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Authorization header required")
+			c.Abort()
+			return
+		}
+
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid authorization format")
+			c.Abort()
+			return
+		}
+
+		tokenString := parts[1]
+		claims := jwt.MapClaims{}
+
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return []byte(secret), nil
+		})
+
+		if err != nil || !token.Valid {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid or expired token")
+			c.Abort()
+			return
+		}
+
+		userID, ok := claims["user_id"]
+		if !ok {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "User ID not found in token")
+			c.Abort()
+			return
+		}
+
+		role, ok := claims["role"]
+		if !ok {
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Role not found in token")
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", userID)
+		c.Set("userRole", role)
 
 		c.Next()
 	}

@@ -52,17 +52,25 @@ type CheckKurikulumResponse struct {
 	SudahSetup int      `json:"sudah_setup"`
 }
 
-// ==================== DTO UNTUK DROPDOWN ====================
-
-type GuruAktifResponse struct {
-	GuruID   uint   `json:"guru_id"`
-	GuruNama string `json:"guru_nama"`
-	GuruNIP  string `json:"guru_nip,omitempty"`
+// GetKurikulumByGuruResponse - response untuk mapel by guru
+type KurikulumByGuruResponse struct {
+	TaID       uint              `json:"ta_id"`
+	TaNama     string            `json:"ta_nama"` // Format: "2024/2025 - Semester Ganjil"
+	KelasID    uint              `json:"kelas_id"`
+	KelasNama  string            `json:"kelas_nama"`
+	GuruID     uint              `json:"guru_id"`
+	GuruNama   string            `json:"guru_nama"`
+	GuruNIP    string            `json:"guru_nip"` // String, handle nil jadi string kosong
+	TotalMapel int               `json:"total_mapel"`
+	MapelList  []MapelByGuruItem `json:"mapel_list"`
+	Message    string            `json:"message,omitempty"`
 }
 
-type MapelAktifResponse struct {
-	KdMapel  uint   `json:"kd_mapel"`
-	NmMapel  string `json:"nm_mapel"`
-	Kelompok string `json:"kelompok"`
-	Jenjang  string `json:"jenjang"`
+// MapelByGuruItem - item mapel yang diajar guru
+type MapelByGuruItem struct {
+	TaKelasMapelID uint   `json:"ta_kelas_mapel_id"`
+	KdMapel        uint   `json:"kd_mapel"`
+	NmMapel        string `json:"nm_mapel"`
+	KKM            int    `json:"kkm"`
+	Urutan         int    `json:"urutan"`
 }

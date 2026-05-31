@@ -10,16 +10,13 @@ import (
 )
 
 type KurikulumController interface {
-	// Untuk dropdown
-	// GetKelasAktif() ([]dto.KelasAktifResponse, error)
-	GetGuruAktif() ([]dto.GuruAktifResponse, error)
-	GetMapelAktif() ([]dto.MapelAktifResponse, error)
 
 	// Untuk setup kurikulum
 	GetKurikulumByKelas(taID, kelasID uint) (dto.KurikulumByKelasResponse, error)
 	SaveKurikulum(req dto.SaveKurikulumRequest) (dto.SaveKurikulumResponse, error)
 	CopyKurikulumFromPrevious(req dto.CopyKurikulumRequest, taID, kelasID uint) (dto.KurikulumByKelasResponse, error)
 	CheckKurikulumStatus(taID uint) (dto.CheckKurikulumResponse, error)
+	GetKurikulumByGuru(taID, kelasID, guruID uint) (dto.KurikulumByGuruResponse, error)
 }
 
 type kurikulumController struct {
@@ -28,56 +25,6 @@ type kurikulumController struct {
 
 func NewKurikulumController(db *gorm.DB) KurikulumController {
 	return &kurikulumController{db: db}
-}
-
-// ==================== GET DATA UNTUK DROPDOWN ====================
-
-func (c *kurikulumController) GetGuruAktif() ([]dto.GuruAktifResponse, error) {
-	var guruList []model.Guru
-
-	err := c.db.Where("status_aktif = ?", true).
-		Order("guru_nama ASC").
-		Find(&guruList).Error
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]dto.GuruAktifResponse, len(guruList))
-	for i, g := range guruList {
-		guruNIP := ""
-		if g.GuruNIP != nil {
-			guruNIP = *g.GuruNIP
-		}
-		result[i] = dto.GuruAktifResponse{
-			GuruID:   g.GuruID,
-			GuruNama: g.GuruNama,
-			GuruNIP:  guruNIP,
-		}
-	}
-	return result, nil
-}
-
-func (c *kurikulumController) GetMapelAktif() ([]dto.MapelAktifResponse, error) {
-	var mapelList []model.Mapel
-
-	err := c.db.Order("kd_mapel ASC").Find(&mapelList).Error
-	if err != nil {
-		return nil, err
-	}
-
-	// Ambil juga data kelompok dan jenjang dari tabel mapel
-	// Asumsi: tabel mapel sudah punya field kelompok dan jenjang
-	// Jika belum, bisa di-skip dulu atau join dengan tabel lain
-	result := make([]dto.MapelAktifResponse, len(mapelList))
-	for i, m := range mapelList {
-		result[i] = dto.MapelAktifResponse{
-			KdMapel: m.KdMapel,
-			NmMapel: m.NmMapel,
-			// Kelompok: m.Kelompok,
-			// Jenjang:  m.Jenjang,
-		}
-	}
-	return result, nil
 }
 
 // ==================== KURIKULUM SETUP ====================
@@ -322,5 +269,85 @@ func (c *kurikulumController) CheckKurikulumStatus(taID uint) (dto.CheckKurikulu
 		BelumSetup: belumSetup,
 		TotalKelas: len(allKelas),
 		SudahSetup: len(setupKelas),
+	}, nil
+}
+
+// GetKurikulumByGuru - mengambil data mapel yang diajar oleh guru tertentu di suatu kelas
+func (c *kurikulumController) GetKurikulumByGuru(taID, kelasID, guruID uint) (dto.KurikulumByGuruResponse, error) {
+	var mapelList []model.TaKelasMapel
+
+	// Ambil data mapel berdasarkan ta_id, kelas_id, dan guru_id
+	err := c.db.
+		Preload("Mapel").
+		Preload("Guru").
+		Where("ta_id = ? AND kelas_id = ? AND guru_id = ?", taID, kelasID, guruID).
+		Order("urutan ASC").
+		Find(&mapelList).Error
+	if err != nil {
+		return dto.KurikulumByGuruResponse{}, err
+	}
+
+	// Jika tidak ada data
+	if len(mapelList) == 0 {
+		return dto.KurikulumByGuruResponse{
+			Message:   "Tidak ada mapel yang diajar oleh guru ini di kelas tersebut",
+			MapelList: []dto.MapelByGuruItem{},
+		}, nil
+	}
+
+	// Ambil info guru dari data pertama
+	var guruNama string
+	var guruNIP string // string, bukan pointer untuk response
+	if len(mapelList) > 0 && mapelList[0].Guru.GuruID != 0 {
+		guruNama = mapelList[0].Guru.GuruNama
+		if mapelList[0].Guru.GuruNIP != nil {
+			guruNIP = *mapelList[0].Guru.GuruNIP
+		}
+	}
+
+	// Ambil info kelas
+	var kelas model.Kelas
+	err = c.db.First(&kelas, kelasID).Error
+	if err != nil {
+		return dto.KurikulumByGuruResponse{}, err
+	}
+
+	// Ambil info tahun ajaran
+	var tahunAjaran model.TahunAjaran
+	err = c.db.First(&tahunAjaran, taID).Error
+	if err != nil {
+		return dto.KurikulumByGuruResponse{}, err
+	}
+
+	// Format nama tahun ajaran (contoh: "2024/2025 - Semester 1")
+	taNama := tahunAjaran.TahunAjaran
+	if tahunAjaran.Semester == "1" {
+		taNama = taNama + " - Semester Ganjil"
+	} else {
+		taNama = taNama + " - Semester Genap"
+	}
+
+	// Konversi ke response
+	mapelItems := make([]dto.MapelByGuruItem, len(mapelList))
+	for i, item := range mapelList {
+		mapelItems[i] = dto.MapelByGuruItem{
+			TaKelasMapelID: item.TaKelasMapelID,
+			KdMapel:        item.KdMapel,
+			NmMapel:        item.Mapel.NmMapel,
+			KKM:            75, // Sesuaikan dengan logic KKM jika ada di model lain
+			Urutan:         item.Urutan,
+		}
+	}
+
+	return dto.KurikulumByGuruResponse{
+		TaID:       taID,
+		TaNama:     taNama,
+		KelasID:    kelasID,
+		KelasNama:  kelas.KelasNama,
+		GuruID:     guruID,
+		GuruNama:   guruNama,
+		GuruNIP:    guruNIP,
+		TotalMapel: len(mapelItems),
+		MapelList:  mapelItems,
 	}, nil
 }

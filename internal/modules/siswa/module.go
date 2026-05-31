@@ -18,7 +18,7 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 	siswaHandler := handler.NewSiswaHandler(siswaController)
 
 	siswa := rg.Group("/siswa")
-	siswa.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	siswa.Use(middleware.AuthMiddleware(cfg))
 	{
 		siswa.GET("/", siswaHandler.GetAllSiswa)
 		siswa.GET("/by-kelas", siswaHandler.GetSiswaByKelas)

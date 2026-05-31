@@ -1,4 +1,3 @@
-// config/config.go
 package config
 
 import (
@@ -26,7 +25,7 @@ type Config struct {
 	StoragePath string
 }
 
-// Global variables
+// Tambahkan DB sebagai field global
 var (
 	DB  *gorm.DB
 	cfg *Config
@@ -35,27 +34,28 @@ var (
 func LoadConfig() *Config {
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("No .env file found, using default values")
+		log.Println("No .env file found")
 	}
 
 	cfg = &Config{
-		AppEnv:      getEnv("APP_ENV", "development"),
-		AppPort:     getEnv("APP_PORT", "8080"),
-		DBDriver:    getEnv("DB_DRIVER", "mysql"),
-		DBHost:      getEnv("DB_HOST", "localhost"),
-		DBPort:      getEnv("DB_PORT", "3306"),
-		DBUser:      getEnv("DB_USER", "root"),
-		DBPass:      getEnv("DB_PASS", ""),
-		DBName:      getEnv("DB_NAME", "go_base"),
-		JWTSecret:   getEnv("JWT_SECRET", "rahasia"),
+		AppEnv:    getEnv("APP_ENV", "development"),
+		AppPort:   getEnv("APP_PORT", "8080"),
+		DBDriver:  getEnv("DB_DRIVER", "mysql"),
+		DBHost:    getEnv("DB_HOST", "localhost"),
+		DBPort:    getEnv("DB_PORT", "3306"),
+		DBUser:    getEnv("DB_USER", "root"),
+		DBPass:    getEnv("DB_PASS", ""),
+		DBName:    getEnv("DB_NAME", "go_base"),
+		JWTSecret: getEnv("JWT_SECRET", "rahasia"),
+		// path penyimpanan lampiran local
 		StoragePath: getEnv("STORAGE_PATH", "storage/lampiran"),
 	}
 
 	return cfg
 }
 
-// InitDB - Perbaiki nama dan signature method ini
-func InitDB(cfg *Config) (*gorm.DB, error) {
+// Fungsi untuk inisialisasi database
+func InitDatabase() error {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		cfg.DBUser,
 		cfg.DBPass,
@@ -69,24 +69,22 @@ func InitDB(cfg *Config) (*gorm.DB, error) {
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
 			SlowThreshold: time.Second,
-			LogLevel:      logger.Info, // Ubah ke Info untuk development
+			LogLevel:      logger.Warn,
 			Colorful:      true,
 		},
 	)
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+	var err error
+	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: gormLogger,
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Set global DB variable untuk backward compatibility
-	DB = db
-
 	log.Println("Database connected successfully")
-	return db, nil
+	return nil
 }
 
 // GetDB mengembalikan instance database

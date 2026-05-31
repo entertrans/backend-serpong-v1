@@ -3,35 +3,35 @@ package middleware
 import (
 	"net/http"
 
+	"github.com/entertrans/backend-bogor.git/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 
 // RoleMiddleware middleware untuk check role user
-func RoleMiddleware(requiredRole string) gin.HandlerFunc {
+func RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get user role from JWT token
-		// Asumsi: role disimpan di claim JWT dengan key "role"
-		roleInterface, exists := c.Get("role")
+		userRole, exists := c.Get("userRole")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "role tidak ditemukan"})
+			response.SendErrorResponse(c, http.StatusUnauthorized, "User role not found")
 			c.Abort()
 			return
 		}
-		
-		role, ok := roleInterface.(string)
+
+		roleStr, ok := userRole.(string)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "role tidak valid"})
+			response.SendErrorResponse(c, http.StatusUnauthorized, "Invalid user role")
 			c.Abort()
 			return
 		}
-		
-		// Check if user has required role
-		if role != requiredRole {
-			c.JSON(http.StatusForbidden, gin.H{"error": "akses ditolak"})
-			c.Abort()
-			return
+
+		for _, allowedRole := range allowedRoles {
+			if roleStr == allowedRole {
+				c.Next()
+				return
+			}
 		}
-		
-		c.Next()
+
+		response.SendErrorResponse(c, http.StatusForbidden, "Access denied: insufficient permissions")
+		c.Abort()
 	}
 }

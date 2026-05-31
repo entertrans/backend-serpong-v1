@@ -1,4 +1,3 @@
-// internal/handler/auth_handler.go
 package handler
 
 import (
@@ -14,9 +13,10 @@ type AuthHandler interface {
 	Register(c *gin.Context)
 	Login(c *gin.Context)
 	Profile(c *gin.Context)
-	CreateSiswa(c *gin.Context)
-	RegisterGuru(c *gin.Context)
-	CreateGuru(c *gin.Context)
+	CreateSiswa(c *gin.Context)  // TAMBAHKAN
+	CreateGuru(c *gin.Context)   // TAMBAHKAN
+	RegisterGuru(c *gin.Context) // TAMBAHKAN
+
 }
 
 type authHandler struct {
@@ -59,27 +59,27 @@ func (h *authHandler) Login(c *gin.Context) {
 	response.SendResponse(c, http.StatusOK, "Login successful", loginDTO)
 }
 
-// func (h *authHandler) Profile(c *gin.Context) {
-// 	userIDVal, exists := c.Get("userID")
-// 	if !exists {
-// 		response.SendErrorResponse(c, http.StatusUnauthorized, "User not found in context")
-// 		return
-// 	}
+func (h *authHandler) Profile(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		response.SendErrorResponse(c, http.StatusUnauthorized, "User not found in context")
+		return
+	}
 
-// 	userID, err := strconv.ParseUint(userIDVal.(string), 10, 32)
-// 	if err != nil {
-// 		response.SendErrorResponse(c, http.StatusBadRequest, "Invalid user ID")
-// 		return
-// 	}
+	userID, err := strconv.ParseUint(userIDVal.(string), 10, 32)
+	if err != nil {
+		response.SendErrorResponse(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
 
-// 	userDTO, err := h.authController.Profile(uint(userID))
-// 	if err != nil {
-// 		response.SendErrorResponse(c, http.StatusNotFound, err.Error())
-// 		return
-// 	}
+	userDTO, err := h.authController.Profile(uint(userID))
+	if err != nil {
+		response.SendErrorResponse(c, http.StatusNotFound, err.Error())
+		return
+	}
 
-// 	response.SendResponse(c, http.StatusOK, "Profile retrieved successfully", userDTO)
-// }
+	response.SendResponse(c, http.StatusOK, "Profile retrieved successfully", userDTO)
+}
 
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
@@ -161,41 +161,4 @@ type RegisterGuruRequest struct {
 	NIP   string `json:"nip" binding:"required"`
 	Name  string `json:"name" binding:"required"`
 	Email string `json:"email"`
-}
-
-// UPDATE Profile handler
-func (h *authHandler) Profile(c *gin.Context) {
-	// Ambil userID dari context (sudah di-set oleh middleware JWT)
-	userIDVal, exists := c.Get("userID")
-	if !exists {
-		response.SendErrorResponse(c, http.StatusUnauthorized, "User not found in context")
-		return
-	}
-
-	// Konversi ke uint
-	var userID uint
-	switch v := userIDVal.(type) {
-	case uint:
-		userID = v
-	case float64:
-		userID = uint(v)
-	case string:
-		id, err := strconv.ParseUint(v, 10, 32)
-		if err != nil {
-			response.SendErrorResponse(c, http.StatusBadRequest, "Invalid user ID")
-			return
-		}
-		userID = uint(id)
-	default:
-		response.SendErrorResponse(c, http.StatusBadRequest, "Invalid user ID type")
-		return
-	}
-
-	profile, err := h.authController.Profile(userID)
-	if err != nil {
-		response.SendErrorResponse(c, http.StatusNotFound, err.Error())
-		return
-	}
-
-	response.SendResponse(c, http.StatusOK, "Profile retrieved successfully", profile)
 }

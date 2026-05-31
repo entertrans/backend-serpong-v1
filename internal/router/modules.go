@@ -1,18 +1,18 @@
+// internal/router/router.go
 package router
 
 import (
+	"github.com/entertrans/backend-bogor.git/internal/config"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-
-	"github.com/entertrans/backend-bogor.git/internal/config"
 )
 
-type Module func(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config)
+type ModuleRegisterFunc func(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config)
 
-func RegisterModules(engine *gin.Engine, db *gorm.DB, cfg *config.Config, modules ...Module) {
-	api := engine.Group("/api/v1")
+func RegisterModules(r *gin.Engine, db *gorm.DB, cfg *config.Config, modules ...ModuleRegisterFunc) {
+	api := r.Group("/api/v1")
 
-	for _, m := range modules {
-		m(api, db, cfg)
+	for _, register := range modules {
+		register(api, db, cfg)
 	}
 }

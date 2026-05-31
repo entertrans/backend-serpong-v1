@@ -1,39 +1,32 @@
-// internal/service/auth_service.go
 package service
 
 import (
 	"errors"
 	"time"
 
-	"github.com/entertrans/backend-bogor.git/internal/config"
-	"github.com/entertrans/backend-bogor.git/internal/dto"
-	"github.com/entertrans/backend-bogor.git/internal/model"
-	"github.com/entertrans/backend-bogor.git/internal/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/entertrans/backend-bogor.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/repository"
 )
 
 type AuthService interface {
 	RegisterUser(email, password, name string) (*model.User, error)
 	LoginUser(email, password string) (string, *model.User, error)
 	GetUserByID(userID uint) (*model.User, error)
-	GetUserProfile(userID uint) (*dto.ProfileResponse, error) // TAMBAHKAN INI
-	CreateSiswaUser(nis, name string) (*model.User, error)
+	CreateSiswaUser(nis, name string) (*model.User, error) // TAMBAHKAN INI
 	CreateGuruUser(nip, name, email string) (*model.User, error)
 }
 
 type authService struct {
-	repo     repository.UserRepository
-	guruRepo repository.GuruRepository // TAMBAHKAN
-	cfg      *config.Config
+	repo repository.UserRepository
+	cfg  *config.Config
 }
 
-func NewAuthService(repo repository.UserRepository, guruRepo repository.GuruRepository, cfg *config.Config) AuthService {
-	return &authService{
-		repo:     repo,
-		guruRepo: guruRepo,
-		cfg:      cfg,
-	}
+func NewAuthService(repo repository.UserRepository, cfg *config.Config) AuthService {
+	return &authService{repo: repo, cfg: cfg}
 }
 
 func (s *authService) RegisterUser(email, password, name string) (*model.User, error) {
@@ -59,6 +52,25 @@ func (s *authService) RegisterUser(email, password, name string) (*model.User, e
 
 	return user, nil
 }
+
+// func (s *authService) LoginUser(email, password string) (string, *model.User, error) {
+// 	user, err := s.repo.FindByEmail(email)
+// 	if err != nil {
+// 		return "", nil, errors.New("invalid credentials")
+// 	}
+
+// 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+// 		return "", nil, errors.New("invalid credentials")
+// 	}
+
+// 	token, err := s.GenerateToken(user.ID)
+// 	if err != nil {
+// 		return "", nil, err
+// 	}
+
+// 	return token, user, nil
+// }
+
 func (s *authService) GetUserByID(userID uint) (*model.User, error) {
 	return s.repo.FindByID(userID)
 }
@@ -123,123 +135,34 @@ func (s *authService) CreateSiswaUser(nis, name string) (*model.User, error) {
 
 	return user, nil
 }
-
-// func (s *authService) CreateGuruUser(nip, name, email string) (*model.User, error) {
-// 	// Jika email tidak diisi, gunakan format default
-// 	if email == "" {
-// 		email = nip + "@guru.sch.id"
-// 	}
-
-// 	// Cek apakah email sudah ada
-// 	existingUser, err := s.repo.FindByEmail(email)
-// 	if err == nil && existingUser != nil {
-// 		return nil, errors.New("user dengan email ini sudah terdaftar")
-// 	}
-
-// 	// Hash password (default = NIP)
-// 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(nip), bcrypt.DefaultCost)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	user := &model.User{
-// 		Email:    email,
-// 		Password: string(hashedPassword),
-// 		Name:     name,
-// 		Role:     "guru", // Set role sebagai guru
-// 	}
-
-// 	if err := s.repo.Create(user); err != nil {
-// 		return nil, err
-// 	}
-
-// 	return user, nil
-// }
-
-// TAMBAHKAN METHOD INI
-func (s *authService) GetUserProfile(userID uint) (*dto.ProfileResponse, error) {
-	// Dapatkan user
-	user, err := s.repo.FindByID(userID)
-	if err != nil {
-		return nil, err
-	}
-
-	userDTO := dto.UserResponse{
-		ID:        user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		Role:      user.Role,
-		CreatedAt: user.CreatedAt,
-	}
-
-	response := &dto.ProfileResponse{
-		User: userDTO,
-		Role: user.Role,
-	}
-
-	// Cari profile berdasarkan role
-	switch user.Role {
-	case "guru":
-		guru, err := s.guruRepo.FindByUserID(user.ID)
-		if err == nil && guru != nil {
-			guruProfile := &dto.GuruProfileResponse{
-				GuruID:          guru.GuruID,
-				GuruNama:        guru.GuruNama,
-				GuruNIP:         guru.GuruNIP,
-				GuruNUPTK:       guru.GuruNUPTK,
-				GuruJenkel:      guru.GuruJenkel,
-				GuruTempatLahir: guru.GuruTempatLahir,
-				GuruTglLahir:    guru.GuruTglLahir,
-				GuruEmail:       guru.GuruEmail,
-				GuruNoTelp:      guru.GuruNoTelp,
-				GuruPhoto:       guru.GuruPhoto,
-				StatusAktif:     guru.StatusAktif,
-			}
-			response.Profile = guruProfile
-		}
-	case "siswa":
-		// TODO: Implement jika ada repository siswa
-		response.Profile = nil
-	default:
-		response.Profile = nil
-	}
-
-	return response, nil
-}
-
-// Update CreateGuruUser - Setelah buat user, buat juga record guru
 func (s *authService) CreateGuruUser(nip, name, email string) (*model.User, error) {
+	// Jika email tidak diisi, gunakan format default
 	if email == "" {
 		email = nip + "@guru.sch.id"
 	}
 
-	// Cek apakah user sudah ada
+	// Cek apakah email sudah ada
 	existingUser, err := s.repo.FindByEmail(email)
 	if err == nil && existingUser != nil {
 		return nil, errors.New("user dengan email ini sudah terdaftar")
 	}
 
-	// Hash password
+	// Hash password (default = NIP)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(nip), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	// Buat user
 	user := &model.User{
 		Email:    email,
 		Password: string(hashedPassword),
 		Name:     name,
-		Role:     "guru",
+		Role:     "guru", // Set role sebagai guru
 	}
 
 	if err := s.repo.Create(user); err != nil {
 		return nil, err
 	}
-
-	// Buat record guru yang terhubung ke user
-	// Catatan: Ini memerlukan repository Guru dengan method Create
-	// Atau bisa langsung menggunakan DB dari service
 
 	return user, nil
 }

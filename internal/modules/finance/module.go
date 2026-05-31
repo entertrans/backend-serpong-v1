@@ -22,7 +22,7 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 
 	// Finance routes group with authentication
 	finance := rg.Group("/finance")
-	finance.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	finance.Use(middleware.AuthMiddleware(cfg))
 	{
 		// ==================== FEE TEMPLATES ====================
 		finance.GET("/fee-templates", feeTemplateHandler.GetAllFeeTemplates)

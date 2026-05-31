@@ -11,19 +11,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// internal/modules/auth/module.go
 func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
-	// Repository
 	userRepo := repository.NewUserRepository(db)
-	guruRepo := repository.NewGuruRepository(db) // <-- TAMBAHKAN INI
-
-	// Service - PASS guruRepo ke authService
-	authService := service.NewAuthService(userRepo, guruRepo, cfg) // <-- UPDATE INI
-
-	// Controller & Handler
+	authService := service.NewAuthService(userRepo, cfg)
 	authController := controller.NewAuthController(authService)
 	authHandler := handler.NewAuthHandler(authController)
 
-	// Public routes (tanpa auth)
+	// internal/modules/auth/module.go
 	authGroup := rg.Group("/auth")
 	{
 		authGroup.POST("/register", authHandler.Register)          // untuk user biasa
@@ -31,15 +26,16 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 		authGroup.POST("/login", authHandler.Login)
 	}
 
-	// Protected routes (perlu login)
+	// Protected (perlu login dan role admin/guru untuk create siswa/guru)
 	protectedGroup := rg.Group("/")
-	protectedGroup.Use(middleware.AuthMiddleware(cfg))
+	protectedGroup.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	{
 		protectedGroup.GET("/profile", authHandler.Profile)
 
 		// Endpoint untuk admin/guru membuat siswa dan guru
+		// Sebaiknya tambahkan middleware role checking juga
 		adminGroup := protectedGroup.Group("/admin")
-		adminGroup.Use(middleware.RoleMiddleware("admin", "guru"))
+		adminGroup.Use(middleware.RoleMiddleware("admin", "guru")) // buat middleware ini
 		{
 			adminGroup.POST("/siswa", authHandler.CreateSiswa)
 			adminGroup.POST("/guru", authHandler.CreateGuru)

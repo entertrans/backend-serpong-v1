@@ -15,7 +15,7 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 	h := lampiranhandler.NewLampiranHandler(ctrl)
 
 	lampiran := rg.Group("/lampiran")
-	lampiran.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	lampiran.Use(middleware.AuthMiddleware(cfg))
 	{
 
 		lampiran.GET("/:nis", h.GetByNIS)
