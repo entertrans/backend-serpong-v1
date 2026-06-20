@@ -12,7 +12,11 @@ import (
 
 type SiswaHandler interface {
 	GetAllSiswa(c *gin.Context)
-	GetSiswaByKelas(c *gin.Context) // Tambahkan ini
+	GetSiswaByKelas(c *gin.Context)                // Tambahkan ini
+	GetSiswaAktif(c *gin.Context)                  // NEW
+	GetSiswaAlumni(c *gin.Context)                 // NEW
+	GetSiswaDeleted(c *gin.Context)                // NEW
+	GetActiveStudentsForEnrollment(c *gin.Context) // ✅ NEW
 	CreateSiswa(c *gin.Context)
 	UpdateSiswa(c *gin.Context)
 	UpdateOrangtua(c *gin.Context)
@@ -44,7 +48,7 @@ func (h *siswaHandler) CreateSiswa(c *gin.Context) {
 	var req dto.CreateSiswaRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fmt.Println("❌ BIND ERROR:", err)
+		// fmt.Println("❌ BIND ERROR:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -54,12 +58,12 @@ func (h *siswaHandler) CreateSiswa(c *gin.Context) {
 
 	err := h.siswaController.CreateSiswa(req)
 	if err != nil {
-		fmt.Println("❌ CONTROLLER ERROR:", err)
+		// fmt.Println("❌ CONTROLLER ERROR:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	fmt.Println("✅ SUCCESS INSERT")
+	// fmt.Println("✅ SUCCESS INSERT")
 
 	// Response dengan informasi login
 	c.JSON(http.StatusOK, gin.H{
@@ -82,7 +86,7 @@ func (h *siswaHandler) UpdateSiswa(c *gin.Context) {
 
 	var req dto.UpdateSiswaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fmt.Println("❌ BIND ERROR:", err)
+		// fmt.Println("❌ BIND ERROR:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -91,7 +95,7 @@ func (h *siswaHandler) UpdateSiswa(c *gin.Context) {
 
 	err := h.siswaController.UpdateSiswa(nis, req)
 	if err != nil {
-		fmt.Println("❌ CONTROLLER ERROR:", err)
+		// fmt.Println("❌ CONTROLLER ERROR:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -112,7 +116,7 @@ func (h *siswaHandler) UpdateOrangtua(c *gin.Context) {
 
 	var req dto.UpdateOrangtuaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fmt.Println("❌ BIND ERROR:", err)
+		// fmt.Println("❌ BIND ERROR:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -121,7 +125,7 @@ func (h *siswaHandler) UpdateOrangtua(c *gin.Context) {
 
 	err := h.siswaController.UpdateOrangtua(nis, req)
 	if err != nil {
-		fmt.Println("❌ CONTROLLER ERROR:", err)
+		// fmt.Println("❌ CONTROLLER ERROR:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -167,5 +171,110 @@ func (h *siswaHandler) GetSiswaByKelas(c *gin.Context) {
 		"message":    "Data siswa berhasil diambil",
 		"data":       result.Data,
 		"pagination": result.Pagination,
+	})
+}
+
+// GetSiswaAktif handler untuk mendapatkan siswa aktif
+func (h *siswaHandler) GetSiswaAktif(c *gin.Context) {
+	var req dto.FilterSiswaStatusRequest
+
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid query parameters",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	result, err := h.siswaController.GetSiswaAktif(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"message":    "Data siswa aktif berhasil diambil",
+		"data":       result.Data,
+		"pagination": result.Pagination,
+		"total":      result.Total,
+	})
+}
+
+// GetSiswaAlumni handler untuk mendapatkan alumni
+func (h *siswaHandler) GetSiswaAlumni(c *gin.Context) {
+	var req dto.FilterSiswaStatusRequest
+
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid query parameters",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	result, err := h.siswaController.GetSiswaAlumni(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"message":    "Data alumni berhasil diambil",
+		"data":       result.Data,
+		"pagination": result.Pagination,
+		"total":      result.Total,
+	})
+}
+
+// GetSiswaDeleted handler untuk mendapatkan siswa yang di-soft delete
+func (h *siswaHandler) GetSiswaDeleted(c *gin.Context) {
+	var req dto.FilterSiswaStatusRequest
+
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid query parameters",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	result, err := h.siswaController.GetSiswaDeleted(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"message":    "Data siswa deleted berhasil diambil",
+		"data":       result.Data,
+		"pagination": result.Pagination,
+		"total":      result.Total,
+	})
+}
+
+// GetActiveStudentsForEnrollment handler untuk mengambil semua siswa aktif (tanpa pagination)
+func (h *siswaHandler) GetActiveStudentsForEnrollment(c *gin.Context) {
+	result, err := h.siswaController.GetActiveStudentsForEnrollment()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Data siswa aktif berhasil diambil",
+		"data":    result,
+		"total":   len(result),
 	})
 }

@@ -43,6 +43,12 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 		taKelasMapel.GET("/check/:ta_id", kurikulumHandler.CheckKurikulumStatusHandler)
 	}
 
+	// ==================== ROUTES WALI KELAS (BARU) ====================
+	taKelasWali := rg.Group("/ta-kelas-wali")
+	taKelasWali.Use(middleware.AuthMiddleware(cfg))
+	{
+		taKelasWali.GET("/:ta_id/:guru_id", kurikulumHandler.GetKelasWaliHandler)
+	}
 	// ==================== ROUTES PENILAIAN ====================
 	penilaian := rg.Group("/penilaian")
 	penilaian.Use(middleware.AuthMiddleware(cfg))
@@ -57,6 +63,9 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 		// Absensi
 		penilaian.GET("/absensi/:ta_id/:kelas_id", penilaianHandler.GetAbsensiHandler)
 		penilaian.POST("/absensi/save", penilaianHandler.SaveAbsensiHandler)
+
+		//audit
+		penilaian.GET("/nilai/history/:raport_nilai_id", penilaianHandler.GetNilaiHistoryHandler)
 
 		// Ekskul
 		penilaian.GET("/ekskul/:ta_id/:kelas_id/:siswa_nis", penilaianHandler.GetEkskulHandler)

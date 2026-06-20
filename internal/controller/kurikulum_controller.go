@@ -17,6 +17,7 @@ type KurikulumController interface {
 	CopyKurikulumFromPrevious(req dto.CopyKurikulumRequest, taID, kelasID uint) (dto.KurikulumByKelasResponse, error)
 	CheckKurikulumStatus(taID uint) (dto.CheckKurikulumResponse, error)
 	GetKurikulumByGuru(taID, kelasID, guruID uint) (dto.KurikulumByGuruResponse, error)
+	GetKelasWali(taID, guruID uint) (dto.GetKelasWaliResponse, error)
 }
 
 type kurikulumController struct {
@@ -349,5 +350,73 @@ func (c *kurikulumController) GetKurikulumByGuru(taID, kelasID, guruID uint) (dt
 		GuruNIP:    guruNIP,
 		TotalMapel: len(mapelItems),
 		MapelList:  mapelItems,
+	}, nil
+}
+
+// Implementasi method GetKelasWali
+func (c *kurikulumController) GetKelasWali(taID, guruID uint) (dto.GetKelasWaliResponse, error) {
+	var kelasWaliList []model.TaKelasWali
+
+	// Ambil data kelas wali berdasarkan ta_id dan guru_id
+	err := c.db.
+		Preload("Kelas").
+		Where("ta_id = ? AND guru_id = ?", taID, guruID).
+		Find(&kelasWaliList).Error
+
+	if err != nil {
+		return dto.GetKelasWaliResponse{}, err
+	}
+
+	// Ambil info tahun ajaran
+	var tahunAjaran model.TahunAjaran
+	err = c.db.First(&tahunAjaran, taID).Error
+	if err != nil {
+		return dto.GetKelasWaliResponse{}, err
+	}
+
+	// Format nama tahun ajaran
+	taNama := tahunAjaran.TahunAjaran
+	if tahunAjaran.Semester == "1" {
+		taNama = taNama + " - Semester Ganjil"
+	} else {
+		taNama = taNama + " - Semester Genap"
+	}
+
+	// Ambil info guru
+	var guru model.Guru
+	err = c.db.First(&guru, guruID).Error
+	if err != nil {
+		return dto.GetKelasWaliResponse{}, err
+	}
+
+	guruNama := guru.GuruNama
+	guruNIP := ""
+	if guru.GuruNIP != nil {
+		guruNIP = *guru.GuruNIP
+	}
+
+	// Konversi ke response
+	kelasList := make([]dto.KelasWaliItem, len(kelasWaliList))
+	for i, item := range kelasWaliList {
+		kelasNama := ""
+		if item.Kelas != nil {
+			kelasNama = item.Kelas.KelasNama
+		}
+		kelasList[i] = dto.KelasWaliItem{
+			KelasID:   item.KelasID,
+			KelasNama: kelasNama,
+		}
+	}
+
+	return dto.GetKelasWaliResponse{
+		TaID:       taID,
+		TaNama:     taNama,
+		Semester:   tahunAjaran.Semester,
+		Status:     tahunAjaran.Status,
+		GuruID:     guruID,
+		GuruNama:   guruNama,
+		GuruNIP:    guruNIP,
+		TotalKelas: len(kelasList),
+		KelasList:  kelasList,
 	}, nil
 }

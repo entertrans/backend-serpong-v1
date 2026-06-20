@@ -11,6 +11,12 @@ type SiswaController interface {
 	GetAllSiswa() ([]dto.SiswaResponse, error)
 	GetSiswaByNIS(nis string) (*dto.SiswaResponse, error)
 	GetSiswaByKelasID(req dto.FilterSiswaRequest) (*dto.SiswaListResponse, error) // Tambahkan ini
+	// NEW: Filter by status
+	GetSiswaAktif(req dto.FilterSiswaStatusRequest) (*dto.SiswaStatusResponse, error)
+	GetSiswaAlumni(req dto.FilterSiswaStatusRequest) (*dto.SiswaStatusResponse, error)
+	GetSiswaDeleted(req dto.FilterSiswaStatusRequest) (*dto.SiswaStatusResponse, error)
+	// ✅ NEW: Khusus untuk frontend (tanpa pagination)
+	GetActiveStudentsForEnrollment() ([]dto.SiswaResponse, error)
 	// Create
 	CreateSiswa(req dto.CreateSiswaRequest) error
 

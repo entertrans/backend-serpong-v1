@@ -1,0 +1,50 @@
+package cbtmodule
+
+import (
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"github.com/entertrans/backend-bogor.git/internal/config"
+	"github.com/entertrans/backend-bogor.git/internal/controller"
+	"github.com/entertrans/backend-bogor.git/internal/handler"
+	"github.com/entertrans/backend-bogor.git/internal/middleware"
+)
+
+func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
+	cbtController := controller.NewCBTController(db)
+	cbtHandler := handler.NewCBTHandler(cbtController)
+
+	cbt := rg.Group("/cbt")
+	cbt.Use(middleware.AuthMiddleware(cfg))
+	{
+		// Assessment
+		cbt.POST("/assessment", cbtHandler.CreateAssessment)
+		cbt.GET("/assessment/:id", cbtHandler.GetAssessmentByID)
+		cbt.GET("/assessments", cbtHandler.GetAssessments)
+
+		// Bank & Question
+		cbt.POST("/bank", cbtHandler.CreateBank)
+		cbt.POST("/question", cbtHandler.CreateQuestion)
+
+		// Enrollment
+		cbt.POST("/enroll", cbtHandler.EnrollStudents)
+
+		// Attempt
+		attempt := cbt.Group("/attempt")
+		{
+			attempt.POST("/start", cbtHandler.StartAttempt)
+			attempt.GET("/resume/:id", cbtHandler.ResumeAttempt)
+			attempt.POST("/answer", cbtHandler.SubmitAnswer)
+			attempt.POST("/essay-draft", cbtHandler.SubmitEssayDraft)
+			attempt.POST("/submit", cbtHandler.SubmitAssessment)
+		}
+
+		// Review (guru only)
+		review := cbt.Group("/review")
+		review.Use(middleware.RoleMiddleware("guru", "admin"))
+		{
+			review.POST("/essay", cbtHandler.ReviewEssay)
+			review.POST("/override", cbtHandler.OverrideScore)
+		}
+	}
+}

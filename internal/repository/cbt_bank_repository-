@@ -1,0 +1,206 @@
+// repository/cbt_bank_repository.go
+package repository
+
+import (
+	"gorm.io/gorm"
+
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+type CBTBankRepository interface {
+	// Bank
+	CreateBank(bank *model.ToQuestionBank) error
+	GetBankByID(id uint) (*model.ToQuestionBank, error)
+	GetBanks(search string, kdMapel, kelasID *uint64, page, limit int) ([]model.ToQuestionBank, int64, error)
+	UpdateBank(bank *model.ToQuestionBank) error
+	DeleteBank(id uint) error
+	CountQuestionsByBankID(bankID uint) (int64, error)
+
+	// Question
+	CreateQuestion(question *model.ToQuestion) error
+	GetQuestionByID(id uint) (*model.ToQuestion, error)
+	GetQuestions(bankID *uint, questionType string, page, limit int) ([]model.ToQuestion, int64, error)
+	UpdateQuestion(question *model.ToQuestion) error
+	DeleteQuestion(id uint) error
+
+	// Options (for MCQ, MULTI_MCQ, TRUE_FALSE)
+	CreateOptions(options []model.ToQuestionOption) error
+	GetOptionsByQuestionID(questionID uint) ([]model.ToQuestionOption, error)
+	DeleteOptionsByQuestionID(questionID uint) error
+
+	// Short Answers
+	CreateShortAnswers(answers []model.ToQuestionShortAnswer) error
+	GetShortAnswersByQuestionID(questionID uint) ([]model.ToQuestionShortAnswer, error)
+	DeleteShortAnswersByQuestionID(questionID uint) error
+
+	// Matching Pairs
+	CreateMatchingPairs(pairs []model.ToQuestionMatching) error
+	GetMatchingPairsByQuestionID(questionID uint) ([]model.ToQuestionMatching, error)
+	DeleteMatchingPairsByQuestionID(questionID uint) error
+}
+
+type cbtBankRepository struct {
+	db *gorm.DB
+}
+
+func NewCBTBankRepository(db *gorm.DB) CBTBankRepository {
+	return &cbtBankRepository{db: db}
+}
+
+// ============================================
+// BANK IMPLEMENTATION
+// ============================================
+
+func (r *cbtBankRepository) CreateBank(bank *model.ToQuestionBank) error {
+	return r.db.Create(bank).Error
+}
+
+func (r *cbtBankRepository) GetBankByID(id uint) (*model.ToQuestionBank, error) {
+	var bank model.ToQuestionBank
+	err := r.db.Preload("Mapel").Preload("Kelas").Preload("User").
+		Where("bank_id = ?", id).
+		First(&bank).Error
+	if err != nil {
+		return nil, err
+	}
+	return &bank, nil
+}
+
+func (r *cbtBankRepository) GetBanks(search string, kdMapel, kelasID *uint64, page, limit int) ([]model.ToQuestionBank, int64, error) {
+	var banks []model.ToQuestionBank
+	var total int64
+
+	query := r.db.Model(&model.ToQuestionBank{}).Preload("Mapel").Preload("Kelas").Preload("User")
+
+	if search != "" {
+		query = query.Where("bank_name LIKE ?", "%"+search+"%")
+	}
+	if kdMapel != nil {
+		query = query.Where("kd_mapel = ?", *kdMapel)
+	}
+	if kelasID != nil {
+		query = query.Where("kelas_id = ?", *kelasID)
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&banks).Error
+
+	return banks, total, err
+}
+
+func (r *cbtBankRepository) UpdateBank(bank *model.ToQuestionBank) error {
+	return r.db.Save(bank).Error
+}
+
+func (r *cbtBankRepository) DeleteBank(id uint) error {
+	return r.db.Delete(&model.ToQuestionBank{}, id).Error
+}
+
+func (r *cbtBankRepository) CountQuestionsByBankID(bankID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.ToQuestion{}).Where("bank_id = ?", bankID).Count(&count).Error
+	return count, err
+}
+
+// ============================================
+// QUESTION IMPLEMENTATION
+// ============================================
+
+func (r *cbtBankRepository) CreateQuestion(question *model.ToQuestion) error {
+	return r.db.Create(question).Error
+}
+
+func (r *cbtBankRepository) GetQuestionByID(id uint) (*model.ToQuestion, error) {
+	var question model.ToQuestion
+	err := r.db.Preload("Bank").Where("question_id = ?", id).First(&question).Error
+	if err != nil {
+		return nil, err
+	}
+	return &question, nil
+}
+
+func (r *cbtBankRepository) GetQuestions(bankID *uint, questionType string, page, limit int) ([]model.ToQuestion, int64, error) {
+	var questions []model.ToQuestion
+	var total int64
+
+	query := r.db.Model(&model.ToQuestion{}).Preload("Bank")
+
+	if bankID != nil {
+		query = query.Where("bank_id = ?", *bankID)
+	}
+	if questionType != "" {
+		query = query.Where("question_type = ?", questionType)
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&questions).Error
+
+	return questions, total, err
+}
+
+func (r *cbtBankRepository) UpdateQuestion(question *model.ToQuestion) error {
+	return r.db.Save(question).Error
+}
+
+func (r *cbtBankRepository) DeleteQuestion(id uint) error {
+	// GORM akan handle cascade karena di SQL sudah ON DELETE CASCADE
+	return r.db.Delete(&model.ToQuestion{}, id).Error
+}
+
+// ============================================
+// OPTIONS IMPLEMENTATION
+// ============================================
+
+func (r *cbtBankRepository) CreateOptions(options []model.ToQuestionOption) error {
+	return r.db.Create(&options).Error
+}
+
+func (r *cbtBankRepository) GetOptionsByQuestionID(questionID uint) ([]model.ToQuestionOption, error) {
+	var options []model.ToQuestionOption
+	err := r.db.Where("question_id = ?", questionID).Order("sort_order ASC").Find(&options).Error
+	return options, err
+}
+
+func (r *cbtBankRepository) DeleteOptionsByQuestionID(questionID uint) error {
+	return r.db.Where("question_id = ?", questionID).Delete(&model.ToQuestionOption{}).Error
+}
+
+// ============================================
+// SHORT ANSWERS IMPLEMENTATION
+// ============================================
+
+func (r *cbtBankRepository) CreateShortAnswers(answers []model.ToQuestionShortAnswer) error {
+	return r.db.Create(&answers).Error
+}
+
+func (r *cbtBankRepository) GetShortAnswersByQuestionID(questionID uint) ([]model.ToQuestionShortAnswer, error) {
+	var answers []model.ToQuestionShortAnswer
+	err := r.db.Where("question_id = ?", questionID).Find(&answers).Error
+	return answers, err
+}
+
+func (r *cbtBankRepository) DeleteShortAnswersByQuestionID(questionID uint) error {
+	return r.db.Where("question_id = ?", questionID).Delete(&model.ToQuestionShortAnswer{}).Error
+}
+
+// ============================================
+// MATCHING PAIRS IMPLEMENTATION
+// ============================================
+
+func (r *cbtBankRepository) CreateMatchingPairs(pairs []model.ToQuestionMatching) error {
+	return r.db.Create(&pairs).Error
+}
+
+func (r *cbtBankRepository) GetMatchingPairsByQuestionID(questionID uint) ([]model.ToQuestionMatching, error) {
+	var pairs []model.ToQuestionMatching
+	err := r.db.Where("question_id = ?", questionID).Order("pair_order ASC").Find(&pairs).Error
+	return pairs, err
+}
+
+func (r *cbtBankRepository) DeleteMatchingPairsByQuestionID(questionID uint) error {
+	return r.db.Where("question_id = ?", questionID).Delete(&model.ToQuestionMatching{}).Error
+}

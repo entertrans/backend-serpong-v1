@@ -1,0 +1,311 @@
+package cbt
+
+import (
+	"encoding/json"
+	"math/rand"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+func (ctrl *cbtController) StartAttempt(c *gin.Context) {
+	var req dto.StartAttemptRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	studentID, exists := c.Get("student_id")
+	if !exists {
+		userID, _ := c.Get("user_id")
+		var siswa model.Siswa
+		err := ctrl.db.Where("user_id = ?", userID).First(&siswa).Error
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "siswa tidak ditemukan"})
+			return
+		}
+		studentID = siswa.SiswaID
+	}
+
+	existingAttempt, _ := ctrl.repo.GetActiveAttempt(req.AssessmentID, studentID.(int))
+	if existingAttempt != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "anda sudah memiliki ujian yang sedang berjalan, silahkan resume"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(req.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "assessment tidak ditemukan"})
+		return
+	}
+
+	now := time.Now()
+	if now.Before(assessment.ActiveFrom) || now.After(assessment.ActiveUntil) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ujian tidak tersedia pada waktu ini"})
+		return
+	}
+
+	assessmentStudent, err := ctrl.repo.GetAssessmentStudentByID(req.AssessmentID, studentID.(int))
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "anda tidak terdaftar dalam ujian ini"})
+		return
+	}
+
+	attempt := &model.ToAttempt{
+		AssessmentID:        req.AssessmentID,
+		AssessmentStudentID: assessmentStudent.AssessmentStudentID,
+		StudentID:           studentID.(int),
+		Status:              "IN_PROGRESS",
+		DeviceInfo:          &req.DeviceInfo,
+		IPAddress:           &req.IPAddress,
+	}
+
+	err = ctrl.repo.CreateAttempt(attempt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestions, err := ctrl.createAttemptQuestions(attempt, assessment)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	questionSnapshots := ctrl.buildQuestionSnapshots(attemptQuestions)
+
+	c.JSON(http.StatusOK, dto.StartAttemptResponse{
+		AttemptID:       attempt.AttemptID,
+		AssessmentID:    assessment.AssessmentID,
+		AssessmentType:  assessment.Type,
+		Title:           assessment.Title,
+		DurationMinutes: assessment.DurationMinutes,
+		StartedAt:       attempt.StartedAt,
+		Questions:       questionSnapshots,
+	})
+}
+
+func (ctrl *cbtController) createAttemptQuestions(attempt *model.ToAttempt, assessment *model.ToAssessment) ([]model.ToAttemptQuestion, error) {
+	assessmentQuestions, err := ctrl.repo.GetAssessmentQuestions(attempt.AssessmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	questionIDs := make([]uint, len(assessmentQuestions))
+	for i, aq := range assessmentQuestions {
+		questionIDs[i] = aq.QuestionID
+	}
+
+	questions, err := ctrl.repo.GetQuestionsByIDs(questionIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	questionMap := make(map[uint]model.ToQuestion)
+	for _, q := range questions {
+		questionMap[q.QuestionID] = q
+	}
+
+	type tempQuestion struct {
+		AssessmentQuestion model.ToAssessmentQuestion
+		Question           model.ToQuestion
+	}
+
+	tempList := make([]tempQuestion, len(assessmentQuestions))
+	for i, aq := range assessmentQuestions {
+		q := questionMap[aq.QuestionID]
+		tempList[i] = tempQuestion{
+			AssessmentQuestion: aq,
+			Question:           q,
+		}
+	}
+
+	if assessment.IsRandomQuestion {
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(tempList), func(i, j int) {
+			tempList[i], tempList[j] = tempList[j], tempList[i]
+		})
+	}
+
+	if assessment.TotalQuestionDisplay != nil && *assessment.TotalQuestionDisplay > 0 && *assessment.TotalQuestionDisplay < len(tempList) {
+		tempList = tempList[:*assessment.TotalQuestionDisplay]
+	}
+
+	attemptQuestions := make([]model.ToAttemptQuestion, 0)
+	displayOrder := 1
+
+	for _, tq := range tempList {
+		var optionsSnapshot *string
+		if tq.Question.QuestionType == "MCQ" || tq.Question.QuestionType == "MULTI_MCQ" || tq.Question.QuestionType == "TRUE_FALSE" {
+			options, err := ctrl.repo.GetOptionsByQuestionID(tq.Question.QuestionID)
+			if err == nil {
+				if assessment.IsRandomOption {
+					rand.Shuffle(len(options), func(i, j int) {
+						options[i], options[j] = options[j], options[i]
+					})
+				}
+
+				type optionSnapshot struct {
+					OptionID  uint   `json:"option_id"`
+					Label     string `json:"label"`
+					Text      string `json:"text"`
+					IsCorrect bool   `json:"is_correct"`
+				}
+
+				snapshotList := make([]optionSnapshot, len(options))
+				for i, opt := range options {
+					snapshotList[i] = optionSnapshot{
+						OptionID:  opt.OptionID,
+						Label:     opt.OptionLabel,
+						Text:      opt.OptionText,
+						IsCorrect: opt.IsCorrect,
+					}
+				}
+
+				jsonBytes, _ := json.Marshal(snapshotList)
+				jsonStr := string(jsonBytes)
+				optionsSnapshot = &jsonStr
+			}
+		}
+
+		attemptQuestion := model.ToAttemptQuestion{
+			AttemptID:                    attempt.AttemptID,
+			OriginalQuestionID:           tq.Question.QuestionID,
+			OriginalAssessmentQuestionID: tq.AssessmentQuestion.AssessmentQuestionID,
+			QuestionSnapshot:             tq.Question.QuestionText,
+			QuestionTypeSnapshot:         tq.Question.QuestionType,
+			WeightSnapshot:               tq.AssessmentQuestion.Weight,
+			OptionsSnapshot:              optionsSnapshot,
+			DisplayOrder:                 displayOrder,
+			ReviewStatus:                 "PENDING",
+		}
+
+		attemptQuestions = append(attemptQuestions, attemptQuestion)
+		displayOrder++
+	}
+
+	err = ctrl.repo.CreateAttemptQuestions(attemptQuestions)
+	if err != nil {
+		return nil, err
+	}
+
+	return attemptQuestions, nil
+}
+
+func (ctrl *cbtController) buildQuestionSnapshots(attemptQuestions []model.ToAttemptQuestion) []dto.QuestionSnapshot {
+	snapshots := make([]dto.QuestionSnapshot, len(attemptQuestions))
+	for i, aq := range attemptQuestions {
+		var options []dto.OptionSnapshot
+		if aq.OptionsSnapshot != nil {
+			json.Unmarshal([]byte(*aq.OptionsSnapshot), &options)
+		}
+
+		snapshots[i] = dto.QuestionSnapshot{
+			AttemptQuestionID: aq.AttemptQuestionID,
+			DisplayOrder:      aq.DisplayOrder,
+			QuestionText:      aq.QuestionSnapshot,
+			QuestionType:      aq.QuestionTypeSnapshot,
+			Weight:            aq.WeightSnapshot,
+			Options:           options,
+		}
+	}
+	return snapshots
+}
+
+func (ctrl *cbtController) ResumeAttempt(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attempt id"})
+		return
+	}
+
+	attempt, err := ctrl.repo.GetAttemptByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt tidak ditemukan"})
+		return
+	}
+
+	if attempt.Status != "IN_PROGRESS" && attempt.Status != "PAUSED" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt sudah selesai atau expired"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestions, err := ctrl.repo.GetAttemptQuestions(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var remainingMinutes *int
+	if assessment.DurationMinutes != nil {
+		elapsed := int(time.Since(attempt.StartedAt).Minutes())
+		remaining := *assessment.DurationMinutes - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		remainingMinutes = &remaining
+	}
+
+	questionSnapshots := ctrl.buildResumeQuestionSnapshots(attemptQuestions)
+
+	c.JSON(http.StatusOK, dto.ResumeAttemptResponse{
+		AttemptID:        attempt.AttemptID,
+		AssessmentID:     assessment.AssessmentID,
+		Title:            assessment.Title,
+		RemainingMinutes: remainingMinutes,
+		Questions:        questionSnapshots,
+	})
+}
+
+func (ctrl *cbtController) buildResumeQuestionSnapshots(attemptQuestions []model.ToAttemptQuestion) []dto.QuestionSnapshot {
+	snapshots := make([]dto.QuestionSnapshot, len(attemptQuestions))
+	for i, aq := range attemptQuestions {
+		var options []dto.OptionSnapshot
+		if aq.OptionsSnapshot != nil {
+			json.Unmarshal([]byte(*aq.OptionsSnapshot), &options)
+		}
+
+		var savedAnswer interface{}
+		switch aq.QuestionTypeSnapshot {
+		case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+			if aq.SelectedOptionIDs != nil {
+				var ids []uint
+				json.Unmarshal([]byte(*aq.SelectedOptionIDs), &ids)
+				savedAnswer = ids
+			}
+		case "SHORT_ANSWER":
+			savedAnswer = aq.AnswerText
+		case "MATCHING":
+			if aq.MatchingAnswerJSON != nil {
+				var matching map[string]string
+				json.Unmarshal([]byte(*aq.MatchingAnswerJSON), &matching)
+				savedAnswer = matching
+			}
+		case "ESSAY":
+			savedAnswer = aq.EssayAnswer
+		}
+
+		snapshots[i] = dto.QuestionSnapshot{
+			AttemptQuestionID: aq.AttemptQuestionID,
+			DisplayOrder:      aq.DisplayOrder,
+			QuestionText:      aq.QuestionSnapshot,
+			QuestionType:      aq.QuestionTypeSnapshot,
+			Weight:            aq.WeightSnapshot,
+			Options:           options,
+			SavedAnswer:       savedAnswer,
+		}
+	}
+	return snapshots
+}

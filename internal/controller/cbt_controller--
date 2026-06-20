@@ -1,0 +1,1182 @@
+package controller
+
+import (
+	"encoding/json"
+	"fmt"
+	"math/rand"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/repository"
+)
+
+type CBTController interface {
+	// Assessment
+	CreateAssessment(c *gin.Context)
+	GetAssessmentByID(c *gin.Context)
+	GetAssessments(c *gin.Context)
+
+	// Bank & Question
+	CreateBank(c *gin.Context)
+	CreateQuestion(c *gin.Context)
+
+	// Enrollment
+	EnrollStudents(c *gin.Context)
+
+	// Attempt
+	StartAttempt(c *gin.Context)
+	ResumeAttempt(c *gin.Context)
+
+	// Answer
+	SubmitAnswer(c *gin.Context)
+	SubmitEssayDraft(c *gin.Context)
+	SubmitAssessment(c *gin.Context)
+
+	// Review
+	ReviewEssay(c *gin.Context)
+	OverrideScore(c *gin.Context)
+}
+
+type cbtController struct {
+	db   *gorm.DB
+	repo repository.CBTRepository
+}
+
+func NewCBTController(db *gorm.DB) CBTController {
+	return &cbtController{
+		db:   db,
+		repo: repository.NewCBTRepository(db),
+	}
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+func (ctrl *cbtController) getStudentName(studentID int) string {
+	var siswa model.Siswa
+	err := ctrl.db.Where("siswa_id = ?", studentID).First(&siswa).Error
+	if err != nil {
+		return ""
+	}
+	if siswa.SiswaNama != nil {
+		return *siswa.SiswaNama
+	}
+	return ""
+}
+
+func (ctrl *cbtController) getStudentNIS(studentID int) string {
+	var siswa model.Siswa
+	err := ctrl.db.Where("siswa_id = ?", studentID).First(&siswa).Error
+	if err != nil {
+		return ""
+	}
+	if siswa.SiswaNIS != nil {
+		return *siswa.SiswaNIS
+	}
+	return ""
+}
+
+func (ctrl *cbtController) getGuruByUserID(userID int) (*model.Guru, error) {
+	var guru model.Guru
+	err := ctrl.db.Where("user_id = ?", userID).First(&guru).Error
+	if err != nil {
+		return nil, err
+	}
+	return &guru, nil
+}
+
+func (ctrl *cbtController) getGuruByID(guruID int) (*model.Guru, error) {
+	var guru model.Guru
+	err := ctrl.db.Where("guru_id = ?", guruID).First(&guru).Error
+	if err != nil {
+		return nil, err
+	}
+	return &guru, nil
+}
+
+func (ctrl *cbtController) calculateMCQScore(questionID uint, selectedOptionIDs []uint, weight float64) float64 {
+	options, err := ctrl.repo.GetOptionsByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	var correctOptionID *uint
+	for _, opt := range options {
+		if opt.IsCorrect {
+			correctOptionID = &opt.OptionID
+			break
+		}
+	}
+
+	if correctOptionID == nil {
+		return 0
+	}
+
+	for _, selectedID := range selectedOptionIDs {
+		if selectedID == *correctOptionID {
+			return weight
+		}
+	}
+
+	return 0
+}
+
+func (ctrl *cbtController) calculateShortAnswerScore(questionID uint, answer string, weight float64) float64 {
+	validAnswers, err := ctrl.repo.GetShortAnswersByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	for _, va := range validAnswers {
+		if va.CaseSensitive {
+			if answer == va.ValidAnswer {
+				return weight
+			}
+		} else {
+			if strings.EqualFold(answer, va.ValidAnswer) {
+				return weight
+			}
+		}
+	}
+
+	return 0
+}
+
+func (ctrl *cbtController) calculateMatchingScore(questionID uint, studentAnswers map[string]string, weight float64) float64 {
+	matchingPairs, err := ctrl.repo.GetMatchingPairsByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	correctCount := 0
+	for _, pair := range matchingPairs {
+		studentRight, exists := studentAnswers[fmt.Sprintf("%d", pair.MatchingID)]
+		if exists && studentRight == pair.RightText {
+			correctCount++
+		}
+	}
+
+	if len(matchingPairs) > 0 {
+		return (float64(correctCount) / float64(len(matchingPairs))) * weight
+	}
+
+	return 0
+}
+
+func timeNowPtr() *time.Time {
+	t := time.Now()
+	return &t
+}
+
+// ============================================
+// ASSESSMENT CONTROLLER
+// ============================================
+
+func (ctrl *cbtController) CreateAssessment(c *gin.Context) {
+	var req dto.CreateAssessmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Cari guru berdasarkan user_id
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	if len(req.QuestionIDs) != len(req.Weights) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "jumlah question_ids dan weights harus sama"})
+		return
+	}
+
+	totalWeight := 0
+	for _, w := range req.Weights {
+		totalWeight += w
+	}
+	if totalWeight != 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "total bobot harus 100"})
+		return
+	}
+
+	if req.ActiveFrom.After(req.ActiveUntil) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "active_from harus sebelum active_until"})
+		return
+	}
+
+	assessment := &model.ToAssessment{
+		Title:                req.Title,
+		Description:          req.Description,
+		Type:                 req.Type,
+		AutoEnrollClassID:    req.AutoEnrollClassID,
+		DurationMinutes:      req.DurationMinutes,
+		IsRandomQuestion:     req.IsRandomQuestion,
+		IsRandomOption:       req.IsRandomOption,
+		TotalQuestionDisplay: req.TotalQuestionDisplay,
+		PassingScore:         req.PassingScore,
+		ActiveFrom:           req.ActiveFrom,
+		ActiveUntil:          req.ActiveUntil,
+		Instruction:          req.Instruction,
+		CreatedBy:            int(guru.GuruID),
+	}
+
+	err = ctrl.repo.CreateAssessment(assessment)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	for i, questionID := range req.QuestionIDs {
+		assessmentQuestion := &model.ToAssessmentQuestion{
+			AssessmentID: assessment.AssessmentID,
+			QuestionID:   questionID,
+			Weight:       req.Weights[i],
+		}
+		err = ctrl.repo.AddQuestionToAssessment(assessmentQuestion)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusCreated, dto.AssessmentResponse{
+		AssessmentID:         assessment.AssessmentID,
+		Title:                assessment.Title,
+		Description:          assessment.Description,
+		Type:                 assessment.Type,
+		DurationMinutes:      assessment.DurationMinutes,
+		IsRandomQuestion:     assessment.IsRandomQuestion,
+		IsRandomOption:       assessment.IsRandomOption,
+		TotalQuestionDisplay: assessment.TotalQuestionDisplay,
+		PassingScore:         assessment.PassingScore,
+		ActiveFrom:           assessment.ActiveFrom,
+		ActiveUntil:          assessment.ActiveUntil,
+		Instruction:          assessment.Instruction,
+		CreatedBy:            assessment.CreatedBy,
+		CreatedAt:            assessment.CreatedAt,
+		TotalQuestions:       len(req.QuestionIDs),
+	})
+}
+
+func (ctrl *cbtController) GetAssessmentByID(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assessment id"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	assessmentQuestions, err := ctrl.repo.GetAssessmentQuestions(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	questions := make([]dto.AssessmentQuestionDetail, 0)
+	for _, aq := range assessmentQuestions {
+		question, err := ctrl.repo.GetQuestionByID(aq.QuestionID)
+		if err != nil {
+			continue
+		}
+		questions = append(questions, dto.AssessmentQuestionDetail{
+			AssessmentQuestionID: aq.AssessmentQuestionID,
+			QuestionID:           question.QuestionID,
+			QuestionText:         question.QuestionText,
+			QuestionType:         question.QuestionType,
+			Weight:               aq.Weight,
+			FixedOrder:           aq.FixedOrder,
+		})
+	}
+
+	assessmentStudents, err := ctrl.repo.GetAssessmentStudents(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	students := make([]dto.AssessmentStudentDetail, 0)
+	for _, as := range assessmentStudents {
+		studentName := ""
+		if as.Siswa != nil && as.Siswa.SiswaNama != nil {
+			studentName = *as.Siswa.SiswaNama
+		}
+		studentNIS := ""
+		if as.Siswa != nil && as.Siswa.SiswaNIS != nil {
+			studentNIS = *as.Siswa.SiswaNIS
+		}
+		students = append(students, dto.AssessmentStudentDetail{
+			AssessmentStudentID: as.AssessmentStudentID,
+			StudentID:           as.StudentID,
+			StudentName:         studentName,
+			StudentNIS:          studentNIS,
+			EnrolledAt:          as.EnrolledAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, dto.AssessmentDetailResponse{
+		AssessmentResponse: dto.AssessmentResponse{
+			AssessmentID:         assessment.AssessmentID,
+			Title:                assessment.Title,
+			Description:          assessment.Description,
+			Type:                 assessment.Type,
+			DurationMinutes:      assessment.DurationMinutes,
+			IsRandomQuestion:     assessment.IsRandomQuestion,
+			IsRandomOption:       assessment.IsRandomOption,
+			TotalQuestionDisplay: assessment.TotalQuestionDisplay,
+			PassingScore:         assessment.PassingScore,
+			ActiveFrom:           assessment.ActiveFrom,
+			ActiveUntil:          assessment.ActiveUntil,
+			Instruction:          assessment.Instruction,
+			CreatedBy:            assessment.CreatedBy,
+			CreatedAt:            assessment.CreatedAt,
+			TotalQuestions:       len(questions),
+			TotalStudents:        len(students),
+		},
+		Questions: questions,
+		Students:  students,
+	})
+}
+
+func (ctrl *cbtController) GetAssessments(c *gin.Context) {
+	assessmentType := c.Query("type")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	assessments, total, err := ctrl.repo.GetAssessmentsByType(assessmentType, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]dto.AssessmentResponse, len(assessments))
+	for i, a := range assessments {
+		questions, _ := ctrl.repo.GetAssessmentQuestions(a.AssessmentID)
+		students, _ := ctrl.repo.GetAssessmentStudents(a.AssessmentID)
+
+		result[i] = dto.AssessmentResponse{
+			AssessmentID:         a.AssessmentID,
+			Title:                a.Title,
+			Description:          a.Description,
+			Type:                 a.Type,
+			DurationMinutes:      a.DurationMinutes,
+			IsRandomQuestion:     a.IsRandomQuestion,
+			IsRandomOption:       a.IsRandomOption,
+			TotalQuestionDisplay: a.TotalQuestionDisplay,
+			PassingScore:         a.PassingScore,
+			ActiveFrom:           a.ActiveFrom,
+			ActiveUntil:          a.ActiveUntil,
+			Instruction:          a.Instruction,
+			CreatedBy:            a.CreatedBy,
+			CreatedAt:            a.CreatedAt,
+			TotalQuestions:       len(questions),
+			TotalStudents:        len(students),
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// ============================================
+// BANK & QUESTION CONTROLLER
+// ============================================
+
+func (ctrl *cbtController) CreateBank(c *gin.Context) {
+	var req dto.CreateBankRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	bank := &model.ToQuestionBank{
+		BankName:   req.BankName,
+		Subject:    req.Subject,
+		SubjectCat: req.SubjectCat,
+		CreatedBy:  int(guru.GuruID),
+	}
+
+	err = ctrl.repo.CreateBank(bank)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, dto.BankResponse{
+		BankID:    bank.BankID,
+		BankName:  bank.BankName,
+		Subject:   bank.Subject,
+		CreatedAt: bank.CreatedAt,
+	})
+}
+
+func (ctrl *cbtController) CreateQuestion(c *gin.Context) {
+	var req dto.CreateQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	question := &model.ToQuestion{
+		BankID:          req.BankID,
+		QuestionType:    req.QuestionType,
+		QuestionText:    req.QuestionText,
+		Explanation:     req.Explanation,
+		DifficultyLevel: req.DifficultyLevel,
+		CreatedBy:       int(guru.GuruID),
+	}
+
+	err = ctrl.repo.CreateQuestion(question)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	switch req.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		options := make([]model.ToQuestionOption, len(req.Options))
+		for i, opt := range req.Options {
+			options[i] = model.ToQuestionOption{
+				QuestionID:  question.QuestionID,
+				OptionLabel: opt.Label,
+				OptionText:  opt.Text,
+				IsCorrect:   opt.IsCorrect,
+				SortOrder:   opt.SortOrder,
+			}
+		}
+		err = ctrl.repo.CreateOptions(options)
+
+	case "SHORT_ANSWER":
+		answers := make([]model.ToQuestionShortAnswer, len(req.ValidAnswers))
+		for i, ans := range req.ValidAnswers {
+			answers[i] = model.ToQuestionShortAnswer{
+				QuestionID:    question.QuestionID,
+				ValidAnswer:   ans,
+				CaseSensitive: req.CaseSensitive,
+			}
+		}
+		err = ctrl.repo.CreateShortAnswers(answers)
+
+	case "MATCHING":
+		pairs := make([]model.ToQuestionMatching, len(req.MatchingPairs))
+		for i, pair := range req.MatchingPairs {
+			pairs[i] = model.ToQuestionMatching{
+				QuestionID: question.QuestionID,
+				LeftText:   pair.LeftText,
+				RightText:  pair.RightText,
+				PairOrder:  pair.PairOrder,
+			}
+		}
+		err = ctrl.repo.CreateMatchingPairs(pairs)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, dto.QuestionResponse{
+		QuestionID:      question.QuestionID,
+		BankID:          question.BankID,
+		QuestionType:    question.QuestionType,
+		QuestionText:    question.QuestionText,
+		Explanation:     question.Explanation,
+		DifficultyLevel: question.DifficultyLevel,
+		CreatedAt:       question.CreatedAt,
+	})
+}
+
+// ============================================
+// ENROLLMENT CONTROLLER
+// ============================================
+
+func (ctrl *cbtController) EnrollStudents(c *gin.Context) {
+	var req dto.EnrollStudentsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	assessmentStudents := make([]model.ToAssessmentStudent, len(req.StudentIDs))
+	for i, studentID := range req.StudentIDs {
+		assessmentStudents[i] = model.ToAssessmentStudent{
+			AssessmentID: req.AssessmentID,
+			StudentID:    studentID,
+		}
+	}
+
+	err := ctrl.repo.AddStudentsToAssessment(assessmentStudents)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "students enrolled successfully"})
+}
+
+// ============================================
+// ATTEMPT CONTROLLER
+// ============================================
+
+func (ctrl *cbtController) StartAttempt(c *gin.Context) {
+	var req dto.StartAttemptRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Ambil student_id dari context (dari middleware auth)
+	studentID, exists := c.Get("student_id")
+	if !exists {
+		// Fallback: ambil dari user_id jika student_id tidak ada
+		userID, _ := c.Get("user_id")
+		var siswa model.Siswa
+		err := ctrl.db.Where("user_id = ?", userID).First(&siswa).Error
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "siswa tidak ditemukan"})
+			return
+		}
+		studentID = siswa.SiswaID
+	}
+
+	// Cek apakah sudah ada attempt aktif
+	existingAttempt, _ := ctrl.repo.GetActiveAttempt(req.AssessmentID, studentID.(int))
+	if existingAttempt != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "anda sudah memiliki ujian yang sedang berjalan, silahkan resume"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(req.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "assessment tidak ditemukan"})
+		return
+	}
+
+	now := time.Now()
+	if now.Before(assessment.ActiveFrom) || now.After(assessment.ActiveUntil) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ujian tidak tersedia pada waktu ini"})
+		return
+	}
+
+	assessmentStudent, err := ctrl.repo.GetAssessmentStudentByID(req.AssessmentID, studentID.(int))
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "anda tidak terdaftar dalam ujian ini"})
+		return
+	}
+
+	attempt := &model.ToAttempt{
+		AssessmentID:        req.AssessmentID,
+		AssessmentStudentID: assessmentStudent.AssessmentStudentID,
+		StudentID:           studentID.(int),
+		Status:              "IN_PROGRESS",
+		DeviceInfo:          &req.DeviceInfo,
+		IPAddress:           &req.IPAddress,
+	}
+
+	err = ctrl.repo.CreateAttempt(attempt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	assessmentQuestions, err := ctrl.repo.GetAssessmentQuestions(req.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	questionIDs := make([]uint, len(assessmentQuestions))
+	for i, aq := range assessmentQuestions {
+		questionIDs[i] = aq.QuestionID
+	}
+
+	questions, err := ctrl.repo.GetQuestionsByIDs(questionIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	questionMap := make(map[uint]model.ToQuestion)
+	for _, q := range questions {
+		questionMap[q.QuestionID] = q
+	}
+
+	attemptQuestions := make([]model.ToAttemptQuestion, 0)
+	displayOrder := 1
+
+	type tempQuestion struct {
+		AssessmentQuestion model.ToAssessmentQuestion
+		Question           model.ToQuestion
+	}
+
+	tempList := make([]tempQuestion, len(assessmentQuestions))
+	for i, aq := range assessmentQuestions {
+		q := questionMap[aq.QuestionID]
+		tempList[i] = tempQuestion{
+			AssessmentQuestion: aq,
+			Question:           q,
+		}
+	}
+
+	if assessment.IsRandomQuestion {
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(tempList), func(i, j int) {
+			tempList[i], tempList[j] = tempList[j], tempList[i]
+		})
+	}
+
+	if assessment.TotalQuestionDisplay != nil && *assessment.TotalQuestionDisplay > 0 && *assessment.TotalQuestionDisplay < len(tempList) {
+		tempList = tempList[:*assessment.TotalQuestionDisplay]
+	}
+
+	for _, tq := range tempList {
+		var optionsSnapshot *string
+		if tq.Question.QuestionType == "MCQ" || tq.Question.QuestionType == "MULTI_MCQ" || tq.Question.QuestionType == "TRUE_FALSE" {
+			options, err := ctrl.repo.GetOptionsByQuestionID(tq.Question.QuestionID)
+			if err == nil {
+				if assessment.IsRandomOption {
+					rand.Shuffle(len(options), func(i, j int) {
+						options[i], options[j] = options[j], options[i]
+					})
+				}
+
+				type optionSnapshot struct {
+					OptionID  uint   `json:"option_id"`
+					Label     string `json:"label"`
+					Text      string `json:"text"`
+					IsCorrect bool   `json:"is_correct"`
+				}
+
+				snapshotList := make([]optionSnapshot, len(options))
+				for i, opt := range options {
+					snapshotList[i] = optionSnapshot{
+						OptionID:  opt.OptionID,
+						Label:     opt.OptionLabel,
+						Text:      opt.OptionText,
+						IsCorrect: opt.IsCorrect,
+					}
+				}
+
+				jsonBytes, _ := json.Marshal(snapshotList)
+				jsonStr := string(jsonBytes)
+				optionsSnapshot = &jsonStr
+			}
+		}
+
+		attemptQuestion := model.ToAttemptQuestion{
+			AttemptID:                    attempt.AttemptID,
+			OriginalQuestionID:           tq.Question.QuestionID,
+			OriginalAssessmentQuestionID: tq.AssessmentQuestion.AssessmentQuestionID,
+			QuestionSnapshot:             tq.Question.QuestionText,
+			QuestionTypeSnapshot:         tq.Question.QuestionType,
+			WeightSnapshot:               tq.AssessmentQuestion.Weight,
+			OptionsSnapshot:              optionsSnapshot,
+			DisplayOrder:                 displayOrder,
+			ReviewStatus:                 "PENDING",
+		}
+
+		attemptQuestions = append(attemptQuestions, attemptQuestion)
+		displayOrder++
+	}
+
+	err = ctrl.repo.CreateAttemptQuestions(attemptQuestions)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	questionSnapshots := make([]dto.QuestionSnapshot, len(attemptQuestions))
+	for i, aq := range attemptQuestions {
+		var options []dto.OptionSnapshot
+		if aq.OptionsSnapshot != nil {
+			json.Unmarshal([]byte(*aq.OptionsSnapshot), &options)
+		}
+
+		questionSnapshots[i] = dto.QuestionSnapshot{
+			AttemptQuestionID: aq.AttemptQuestionID,
+			DisplayOrder:      aq.DisplayOrder,
+			QuestionText:      aq.QuestionSnapshot,
+			QuestionType:      aq.QuestionTypeSnapshot,
+			Weight:            aq.WeightSnapshot,
+			Options:           options,
+		}
+	}
+
+	c.JSON(http.StatusOK, dto.StartAttemptResponse{
+		AttemptID:       attempt.AttemptID,
+		AssessmentID:    assessment.AssessmentID,
+		AssessmentType:  assessment.Type,
+		Title:           assessment.Title,
+		DurationMinutes: assessment.DurationMinutes,
+		StartedAt:       attempt.StartedAt,
+		Questions:       questionSnapshots,
+	})
+}
+
+func (ctrl *cbtController) ResumeAttempt(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attempt id"})
+		return
+	}
+
+	attempt, err := ctrl.repo.GetAttemptByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt tidak ditemukan"})
+		return
+	}
+
+	if attempt.Status != "IN_PROGRESS" && attempt.Status != "PAUSED" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt sudah selesai atau expired"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestions, err := ctrl.repo.GetAttemptQuestions(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var remainingMinutes *int
+	if assessment.DurationMinutes != nil {
+		elapsed := int(time.Since(attempt.StartedAt).Minutes())
+		remaining := *assessment.DurationMinutes - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		remainingMinutes = &remaining
+	}
+
+	questionSnapshots := make([]dto.QuestionSnapshot, len(attemptQuestions))
+	for i, aq := range attemptQuestions {
+		var options []dto.OptionSnapshot
+		if aq.OptionsSnapshot != nil {
+			json.Unmarshal([]byte(*aq.OptionsSnapshot), &options)
+		}
+
+		var savedAnswer interface{}
+		switch aq.QuestionTypeSnapshot {
+		case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+			if aq.SelectedOptionIDs != nil {
+				var ids []uint
+				json.Unmarshal([]byte(*aq.SelectedOptionIDs), &ids)
+				savedAnswer = ids
+			}
+		case "SHORT_ANSWER":
+			savedAnswer = aq.AnswerText
+		case "MATCHING":
+			if aq.MatchingAnswerJSON != nil {
+				var matching map[string]string
+				json.Unmarshal([]byte(*aq.MatchingAnswerJSON), &matching)
+				savedAnswer = matching
+			}
+		case "ESSAY":
+			savedAnswer = aq.EssayAnswer
+		}
+
+		questionSnapshots[i] = dto.QuestionSnapshot{
+			AttemptQuestionID: aq.AttemptQuestionID,
+			DisplayOrder:      aq.DisplayOrder,
+			QuestionText:      aq.QuestionSnapshot,
+			QuestionType:      aq.QuestionTypeSnapshot,
+			Weight:            aq.WeightSnapshot,
+			Options:           options,
+			SavedAnswer:       savedAnswer,
+		}
+	}
+
+	c.JSON(http.StatusOK, dto.ResumeAttemptResponse{
+		AttemptID:        attempt.AttemptID,
+		AssessmentID:     assessment.AssessmentID,
+		Title:            assessment.Title,
+		RemainingMinutes: remainingMinutes,
+		Questions:        questionSnapshots,
+	})
+}
+
+// ============================================
+// ANSWER CONTROLLER
+// ============================================
+
+func (ctrl *cbtController) SubmitAnswer(c *gin.Context) {
+	var req dto.SubmitAnswerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestion, err := ctrl.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt tidak cocok"})
+		return
+	}
+
+	switch attemptQuestion.QuestionTypeSnapshot {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		idsJSON, _ := json.Marshal(req.SelectedOptionIDs)
+		idsStr := string(idsJSON)
+		attemptQuestion.SelectedOptionIDs = &idsStr
+
+		autoScore := ctrl.calculateMCQScore(attemptQuestion.OriginalQuestionID, req.SelectedOptionIDs, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "SHORT_ANSWER":
+		attemptQuestion.AnswerText = req.AnswerText
+
+		if req.AnswerText != nil {
+			autoScore := ctrl.calculateShortAnswerScore(attemptQuestion.OriginalQuestionID, *req.AnswerText, float64(attemptQuestion.WeightSnapshot))
+			attemptQuestion.AutoScore = &autoScore
+		}
+
+	case "MATCHING":
+		matchingJSON, _ := json.Marshal(req.MatchingAnswer)
+		matchingStr := string(matchingJSON)
+		attemptQuestion.MatchingAnswerJSON = &matchingStr
+
+		autoScore := ctrl.calculateMatchingScore(attemptQuestion.OriginalQuestionID, req.MatchingAnswer, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "ESSAY":
+		if req.IsFinalSubmit {
+			attemptQuestion.EssayAnswer = req.EssayAnswer
+			attemptQuestion.EssayLastSavedAt = timeNowPtr()
+		}
+	}
+
+	err = ctrl.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attempt, _ := ctrl.repo.GetAttemptByID(req.AttemptID)
+	if attempt != nil {
+		attempt.LastActivityAt = time.Now()
+		ctrl.repo.UpdateAttempt(attempt)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "answer saved"})
+}
+
+func (ctrl *cbtController) SubmitEssayDraft(c *gin.Context) {
+	var req dto.SubmitEssayDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestion, err := ctrl.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt tidak cocok"})
+		return
+	}
+
+	if attemptQuestion.QuestionTypeSnapshot != "ESSAY" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hanya essay yang memiliki draft"})
+		return
+	}
+
+	attemptQuestion.EssayAnswer = &req.EssayDraft
+	attemptQuestion.EssayLastSavedAt = timeNowPtr()
+
+	err = ctrl.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log := &model.ToAutosaveLog{
+		AttemptID:         req.AttemptID,
+		AttemptQuestionID: &req.AttemptQuestionID,
+		Action:            "AUTO_SAVE_DRAFT",
+	}
+	ctrl.repo.CreateAutosaveLog(log)
+
+	c.JSON(http.StatusOK, gin.H{"message": "essay draft saved"})
+}
+
+func (ctrl *cbtController) SubmitAssessment(c *gin.Context) {
+	var req dto.SubmitAssessmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	attempt, err := ctrl.repo.GetAttemptByID(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+		return
+	}
+
+	if attempt.Status != "IN_PROGRESS" && attempt.Status != "PAUSED" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt sudah disubmit sebelumnya"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestions, err := ctrl.repo.GetAttemptQuestions(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var totalScore float64
+	var totalWeight int
+
+	for _, aq := range attemptQuestions {
+		totalWeight += aq.WeightSnapshot
+
+		if aq.AutoScore != nil {
+			totalScore += *aq.AutoScore
+		}
+	}
+
+	finalScore := (totalScore / float64(totalWeight)) * 100
+
+	status := "COMPLETED"
+	hasEssay := false
+
+	for _, aq := range attemptQuestions {
+		if aq.QuestionTypeSnapshot == "ESSAY" && aq.TeacherScore == nil {
+			hasEssay = true
+			break
+		}
+	}
+
+	if hasEssay {
+		status = "WAITING_REVIEW"
+	}
+
+	submittedAt := time.Now()
+	isPassed := finalScore >= assessment.PassingScore
+
+	attempt.Status = status
+	attempt.SubmittedAt = &submittedAt
+	attempt.FinalScore = &finalScore
+	attempt.IsPassed = &isPassed
+
+	err = ctrl.repo.UpdateAttempt(attempt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log := &model.ToAutosaveLog{
+		AttemptID: req.AttemptID,
+		Action:    "SUBMIT",
+	}
+	ctrl.repo.CreateAutosaveLog(log)
+
+	c.JSON(http.StatusOK, gin.H{"message": "assessment submitted successfully"})
+}
+
+// ============================================
+// REVIEW CONTROLLER
+// ============================================
+
+func (ctrl *cbtController) ReviewEssay(c *gin.Context) {
+	var req dto.ReviewEssayRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	attemptQuestion, err := ctrl.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt tidak cocok"})
+		return
+	}
+
+	if attemptQuestion.QuestionTypeSnapshot != "ESSAY" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hanya essay yang bisa direview"})
+		return
+	}
+
+	attemptQuestion.TeacherScore = &req.TeacherScore
+	attemptQuestion.TeacherNote = &req.TeacherNote
+	attemptQuestion.ReviewStatus = "APPROVED"
+	attemptQuestion.ReviewedAt = timeNowPtr()
+	reviewedBy := int(guru.GuruID)
+	attemptQuestion.ReviewedBy = &reviewedBy
+
+	err = ctrl.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attempt, err := ctrl.repo.GetAttemptByID(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestions, err := ctrl.repo.GetAttemptQuestions(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var totalScore float64
+	var totalWeight int
+
+	for _, aq := range attemptQuestions {
+		totalWeight += aq.WeightSnapshot
+
+		if aq.AutoScore != nil {
+			totalScore += *aq.AutoScore
+		}
+		if aq.TeacherScore != nil {
+			totalScore += *aq.TeacherScore
+		}
+	}
+
+	finalScore := (totalScore / float64(totalWeight)) * 100
+	isPassed := finalScore >= assessment.PassingScore
+
+	hasPendingEssay := false
+	for _, aq := range attemptQuestions {
+		if aq.QuestionTypeSnapshot == "ESSAY" && aq.ReviewStatus == "PENDING" {
+			hasPendingEssay = true
+			break
+		}
+	}
+
+	if !hasPendingEssay {
+		attempt.Status = "COMPLETED"
+	}
+
+	attempt.FinalScore = &finalScore
+	attempt.IsPassed = &isPassed
+
+	err = ctrl.repo.UpdateAttempt(attempt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "essay reviewed"})
+}
+
+func (ctrl *cbtController) OverrideScore(c *gin.Context) {
+	var req dto.OverrideScoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	attempt, err := ctrl.repo.GetAttemptByID(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attempt.IsOverride = true
+	attempt.OverrideScore = &req.NewScore
+	attempt.OverrideReason = &req.Reason
+	overriddenBy := int(guru.GuruID)
+	attempt.OverriddenBy = &overriddenBy
+	attempt.OverriddenAt = timeNowPtr()
+	attempt.FinalScore = &req.NewScore
+	isPassed := req.NewScore >= assessment.PassingScore
+	attempt.IsPassed = &isPassed
+
+	err = ctrl.repo.UpdateAttempt(attempt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "score overridden"})
+}

@@ -13,7 +13,7 @@ import (
 
 // CreateSiswa membuat siswa + user + orangtua dalam 1 transaksi
 func (c *siswaController) CreateSiswa(req dto.CreateSiswaRequest) error {
-	fmt.Println("🚀 MASUK CONTROLLER - CREATE SISWA")
+	// fmt.Println("🚀 MASUK CONTROLLER - CREATE SISWA")
 
 	tx := c.db.Begin()
 
@@ -89,7 +89,7 @@ func (c *siswaController) CreateSiswa(req dto.CreateSiswaRequest) error {
 		return err
 	}
 
-	fmt.Println("✅ SISWA INSERTED")
+	// fmt.Println("✅ SISWA INSERTED")
 
 	// ======================
 	// 3. INSERT ORANGTUA (OPTIONAL)
@@ -105,11 +105,11 @@ func (c *siswaController) CreateSiswa(req dto.CreateSiswaRequest) error {
 // createOrangtua helper untuk insert data orangtua
 func (c *siswaController) createOrangtua(tx *gorm.DB, nis string, ortu dto.OrangtuaPayload) error {
 	if ortu.AyahNama == nil && ortu.NoTelpAyah == nil {
-		fmt.Println("⏭️ SKIP INSERT ORTU (kosong)")
+		// fmt.Println("⏭️ SKIP INSERT ORTU (kosong)")
 		return nil
 	}
 
-	fmt.Println("👨‍👩‍👧 INSERT ORTU")
+	// fmt.Println("👨‍👩‍👧 INSERT ORTU")
 
 	ortuModel := model.Orangtua{
 		SiswaNIS:   &nis,
@@ -126,10 +126,10 @@ func (c *siswaController) createOrangtua(tx *gorm.DB, nis string, ortu dto.Orang
 	}
 
 	if err := tx.Create(&ortuModel).Error; err != nil {
-		fmt.Println("❌ GAGAL INSERT ORTU:", err)
+		// fmt.Println("❌ GAGAL INSERT ORTU:", err)
 		return err
 	}
 
-	fmt.Println("✅ ORANGTUA INSERTED")
+	// fmt.Println("✅ ORANGTUA INSERTED")
 	return nil
 }

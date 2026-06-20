@@ -1,0 +1,209 @@
+package model
+
+import "time"
+
+// ============================================
+// ASSESSMENT
+// ============================================
+type ToAssessment struct {
+	AssessmentID         uint       `gorm:"primaryKey;autoIncrement" json:"assessment_id"`
+	Title                string     `gorm:"type:varchar(255);not null" json:"title"`
+	Description          *string    `gorm:"type:text" json:"description,omitempty"`
+	Type                 string     `gorm:"type:enum('UB','QUIZ','UTS','UAS','TASK');not null" json:"type"`
+	AutoEnrollClassID    *int       `gorm:"column:auto_enroll_class_id" json:"auto_enroll_class_id,omitempty"`
+	DurationMinutes      *int       `gorm:"column:duration_minutes" json:"duration_minutes,omitempty"`
+	IsRandomQuestion     bool       `gorm:"default:false" json:"is_random_question"`
+	IsRandomOption       bool       `gorm:"default:false" json:"is_random_option"`
+	TotalQuestionDisplay *int       `gorm:"column:total_question_displayed" json:"total_question_displayed,omitempty"`
+	PassingScore         float64    `gorm:"default:70.00" json:"passing_score"`
+	ActiveFrom           time.Time  `gorm:"column:active_from;not null" json:"active_from"`
+	ActiveUntil          time.Time  `gorm:"column:active_until;not null" json:"active_until"`
+	Instruction          *string    `gorm:"type:text" json:"instruction,omitempty"`
+	CreatedBy            int        `gorm:"column:created_by;not null" json:"created_by"`
+	CreatedAt            time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt            time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt            *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+func (ToAssessment) TableName() string { return "to_assessment" }
+
+// ============================================
+// ASSESSMENT STUDENT (Peserta)
+// ============================================
+type ToAssessmentStudent struct {
+	AssessmentStudentID uint      `gorm:"primaryKey;autoIncrement" json:"assessment_student_id"`
+	AssessmentID        uint      `gorm:"not null;index" json:"assessment_id"`
+	StudentID           int       `gorm:"not null;index" json:"student_id"`
+	EnrolledAt          time.Time `gorm:"autoCreateTime" json:"enrolled_at"`
+	IsActive            bool      `gorm:"default:true" json:"is_active"`
+
+	// Relasi ke tabel siswa
+	Siswa *Siswa `gorm:"foreignKey:StudentID;references:SiswaID" json:"siswa,omitempty"`
+}
+
+func (ToAssessmentStudent) TableName() string { return "to_assessment_student" }
+
+// ============================================
+// ASSESSMENT QUESTION (Soal dalam assessment)
+// ============================================
+type ToAssessmentQuestion struct {
+	AssessmentQuestionID uint `gorm:"primaryKey;autoIncrement" json:"assessment_question_id"`
+	AssessmentID         uint `gorm:"not null;index" json:"assessment_id"`
+	QuestionID           uint `gorm:"not null" json:"question_id"`
+	Weight               int  `gorm:"default:1" json:"weight"`
+	FixedOrder           *int `gorm:"column:fixed_order" json:"fixed_order,omitempty"`
+}
+
+func (ToAssessmentQuestion) TableName() string { return "to_assessment_question" }
+
+// ============================================
+// QUESTION BANK
+// ============================================
+type ToQuestionBank struct {
+	BankID     uint       `gorm:"primaryKey;autoIncrement" json:"bank_id"`
+	BankName   string     `gorm:"type:varchar(255);not null" json:"bank_name"`
+	Subject    *string    `gorm:"type:varchar(100)" json:"subject,omitempty"`
+	SubjectCat *string    `gorm:"column:subject_category" json:"subject_category,omitempty"`
+	CreatedBy  int        `gorm:"not null" json:"created_by"`
+	CreatedAt  time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt  *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+
+	// Relasi ke guru
+	Guru *Guru `gorm:"foreignKey:CreatedBy;references:GuruID" json:"guru,omitempty"`
+}
+
+func (ToQuestionBank) TableName() string { return "to_question_bank" }
+
+// ============================================
+// MASTER QUESTION
+// ============================================
+type ToQuestion struct {
+	QuestionID      uint       `gorm:"primaryKey;autoIncrement" json:"question_id"`
+	BankID          *uint      `gorm:"column:bank_id;index" json:"bank_id,omitempty"`
+	QuestionType    string     `gorm:"column:question_type;type:enum('MCQ','MULTI_MCQ','TRUE_FALSE','SHORT_ANSWER','ESSAY','MATCHING');not null" json:"question_type"`
+	QuestionText    string     `gorm:"column:question_text;type:text;not null" json:"question_text"`
+	Explanation     *string    `gorm:"type:text" json:"explanation,omitempty"`
+	DifficultyLevel string     `gorm:"column:difficulty_level;type:enum('EASY','MEDIUM','HARD');default:'MEDIUM'" json:"difficulty_level"`
+	CreatedBy       int        `gorm:"not null" json:"created_by"`
+	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt       *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+func (ToQuestion) TableName() string { return "to_question" }
+
+// ============================================
+// QUESTION OPTION
+// ============================================
+type ToQuestionOption struct {
+	OptionID    uint    `gorm:"primaryKey;autoIncrement" json:"option_id"`
+	QuestionID  uint    `gorm:"not null;index" json:"question_id"`
+	OptionLabel string  `gorm:"type:varchar(10);not null" json:"option_label"`
+	OptionText  string  `gorm:"type:text;not null" json:"option_text"`
+	OptionImage *string `gorm:"column:option_image_url" json:"option_image_url,omitempty"`
+	IsCorrect   bool    `gorm:"default:false" json:"is_correct"`
+	SortOrder   int     `gorm:"default:0" json:"sort_order"`
+}
+
+func (ToQuestionOption) TableName() string { return "to_question_option" }
+
+// ============================================
+// SHORT ANSWER VALID
+// ============================================
+type ToQuestionShortAnswer struct {
+	ShortAnswerID uint   `gorm:"primaryKey;autoIncrement" json:"short_answer_id"`
+	QuestionID    uint   `gorm:"not null;index" json:"question_id"`
+	ValidAnswer   string `gorm:"type:text;not null" json:"valid_answer"`
+	CaseSensitive bool   `gorm:"default:false" json:"case_sensitive"`
+	IsRegex       bool   `gorm:"default:false" json:"is_regex"`
+}
+
+func (ToQuestionShortAnswer) TableName() string { return "to_question_short_answer" }
+
+// ============================================
+// MATCHING PAIRS
+// ============================================
+type ToQuestionMatching struct {
+	MatchingID uint   `gorm:"primaryKey;autoIncrement" json:"matching_id"`
+	QuestionID uint   `gorm:"not null;index" json:"question_id"`
+	LeftText   string `gorm:"type:varchar(255);not null" json:"left_text"`
+	RightText  string `gorm:"type:varchar(255);not null" json:"right_text"`
+	PairOrder  int    `gorm:"default:0" json:"pair_order"`
+}
+
+func (ToQuestionMatching) TableName() string { return "to_question_matching" }
+
+// ============================================
+// ATTEMPT (Sesi Pengerjaan)
+// ============================================
+type ToAttempt struct {
+	AttemptID           uint       `gorm:"primaryKey;autoIncrement" json:"attempt_id"`
+	AssessmentID        uint       `gorm:"not null;index" json:"assessment_id"`
+	AssessmentStudentID uint       `gorm:"not null;index" json:"assessment_student_id"`
+	StudentID           int        `gorm:"not null;index" json:"student_id"`
+	StartedAt           time.Time  `gorm:"autoCreateTime" json:"started_at"`
+	LastActivityAt      time.Time  `gorm:"autoUpdateTime" json:"last_activity_at"`
+	SubmittedAt         *time.Time `json:"submitted_at,omitempty"`
+	Status              string     `gorm:"type:enum('IN_PROGRESS','PAUSED','WAITING_REVIEW','COMPLETED','EXPIRED');default:'IN_PROGRESS'" json:"status"`
+	FinalScore          *float64   `gorm:"type:decimal(5,2)" json:"final_score,omitempty"`
+	IsPassed            *bool      `json:"is_passed,omitempty"`
+	IsOverride          bool       `gorm:"default:false" json:"is_override"`
+	OverrideScore       *float64   `gorm:"type:decimal(5,2)" json:"override_score,omitempty"`
+	OverrideReason      *string    `gorm:"type:text" json:"override_reason,omitempty"`
+	OverriddenBy        *int       `json:"overridden_by,omitempty"`
+	OverriddenAt        *time.Time `json:"overridden_at,omitempty"`
+	DeviceInfo          *string    `json:"device_info,omitempty"`
+	IPAddress           *string    `json:"ip_address,omitempty"`
+
+	// Relasi
+	Siswa      *Siswa              `gorm:"foreignKey:StudentID;references:SiswaID" json:"siswa,omitempty"`
+	Assessment *ToAssessment       `gorm:"foreignKey:AssessmentID;references:AssessmentID" json:"assessment,omitempty"`
+	Questions  []ToAttemptQuestion `gorm:"foreignKey:AttemptID;references:AttemptID" json:"questions,omitempty"`
+}
+
+func (ToAttempt) TableName() string { return "to_attempt" }
+
+// ============================================
+// ATTEMPT QUESTION (Jawaban & Snapshot)
+// ============================================
+type ToAttemptQuestion struct {
+	AttemptQuestionID            uint       `gorm:"primaryKey;autoIncrement" json:"attempt_question_id"`
+	AttemptID                    uint       `gorm:"not null;index" json:"attempt_id"`
+	OriginalQuestionID           uint       `gorm:"not null" json:"original_question_id"`
+	OriginalAssessmentQuestionID uint       `gorm:"not null" json:"original_assessment_question_id"`
+	QuestionSnapshot             string     `gorm:"type:text;not null" json:"question_snapshot"`
+	QuestionTypeSnapshot         string     `gorm:"type:varchar(20);not null" json:"question_type_snapshot"`
+	WeightSnapshot               int        `json:"weight_snapshot"`
+	OptionsSnapshot              *string    `gorm:"type:json" json:"options_snapshot,omitempty"`
+	DisplayOrder                 int        `json:"display_order"`
+	SelectedOptionIDs            *string    `gorm:"type:json" json:"selected_option_ids,omitempty"`
+	AnswerText                   *string    `gorm:"type:mediumtext" json:"answer_text,omitempty"`
+	MatchingAnswerJSON           *string    `gorm:"type:json" json:"matching_answer_json,omitempty"`
+	EssayAnswer                  *string    `gorm:"type:mediumtext" json:"essay_answer,omitempty"`
+	EssayLastSavedAt             *time.Time `json:"essay_last_saved_at,omitempty"`
+	AutoScore                    *float64   `gorm:"type:decimal(5,2)" json:"auto_score,omitempty"`
+	TeacherScore                 *float64   `gorm:"type:decimal(5,2)" json:"teacher_score,omitempty"`
+	TeacherNote                  *string    `gorm:"type:text" json:"teacher_note,omitempty"`
+	ReviewStatus                 string     `gorm:"type:enum('PENDING','APPROVED','REJECTED');default:'PENDING'" json:"review_status"`
+	ReviewedAt                   *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy                   *int       `json:"reviewed_by,omitempty"`
+	CreatedAt                    time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt                    time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+func (ToAttemptQuestion) TableName() string { return "to_attempt_question" }
+
+// ============================================
+// AUTOSAVE LOG
+// ============================================
+type ToAutosaveLog struct {
+	LogID             uint      `gorm:"primaryKey;autoIncrement" json:"log_id"`
+	AttemptID         uint      `gorm:"not null;index" json:"attempt_id"`
+	AttemptQuestionID *uint     `json:"attempt_question_id,omitempty"`
+	Action            string    `gorm:"type:enum('AUTO_SAVE_DRAFT','NEXT_QUESTION','SUBMIT','RESUME');not null" json:"action"`
+	SnapshotData      *string   `gorm:"type:json" json:"snapshot_data,omitempty"`
+	CreatedAt         time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
+func (ToAutosaveLog) TableName() string { return "to_autosave_log" }

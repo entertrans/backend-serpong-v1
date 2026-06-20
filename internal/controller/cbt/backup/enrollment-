@@ -1,0 +1,34 @@
+package cbt
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+func (ctrl *cbtController) EnrollStudents(c *gin.Context) {
+	var req dto.EnrollStudentsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	assessmentStudents := make([]model.ToAssessmentStudent, len(req.StudentIDs))
+	for i, studentID := range req.StudentIDs {
+		assessmentStudents[i] = model.ToAssessmentStudent{
+			AssessmentID: req.AssessmentID,
+			StudentID:    studentID,
+		}
+	}
+
+	err := ctrl.repo.AddStudentsToAssessment(assessmentStudents)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "students enrolled successfully"})
+}

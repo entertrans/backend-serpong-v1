@@ -1,0 +1,131 @@
+package cbt
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+func (ctrl *cbtController) getStudentName(studentID int) string {
+	var siswa model.Siswa
+	err := ctrl.db.Where("siswa_id = ?", studentID).First(&siswa).Error
+	if err != nil {
+		return ""
+	}
+	if siswa.SiswaNama != nil {
+		return *siswa.SiswaNama
+	}
+	return ""
+}
+
+func (ctrl *cbtController) getStudentNIS(studentID int) string {
+	var siswa model.Siswa
+	err := ctrl.db.Where("siswa_id = ?", studentID).First(&siswa).Error
+	if err != nil {
+		return ""
+	}
+	if siswa.SiswaNIS != nil {
+		return *siswa.SiswaNIS
+	}
+	return ""
+}
+
+func (ctrl *cbtController) getGuruByUserID(userID int) (*model.Guru, error) {
+	var guru model.Guru
+	err := ctrl.db.Where("user_id = ?", userID).First(&guru).Error
+	if err != nil {
+		return nil, err
+	}
+	return &guru, nil
+}
+
+func (ctrl *cbtController) getGuruByID(guruID int) (*model.Guru, error) {
+	var guru model.Guru
+	err := ctrl.db.Where("guru_id = ?", guruID).First(&guru).Error
+	if err != nil {
+		return nil, err
+	}
+	return &guru, nil
+}
+
+func (ctrl *cbtController) calculateMCQScore(questionID uint, selectedOptionIDs []uint, weight float64) float64 {
+	options, err := ctrl.repo.GetOptionsByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	var correctOptionID *uint
+	for _, opt := range options {
+		if opt.IsCorrect {
+			correctOptionID = &opt.OptionID
+			break
+		}
+	}
+
+	if correctOptionID == nil {
+		return 0
+	}
+
+	for _, selectedID := range selectedOptionIDs {
+		if selectedID == *correctOptionID {
+			return weight
+		}
+	}
+
+	return 0
+}
+
+func (ctrl *cbtController) calculateShortAnswerScore(questionID uint, answer string, weight float64) float64 {
+	validAnswers, err := ctrl.repo.GetShortAnswersByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	for _, va := range validAnswers {
+		if va.CaseSensitive {
+			if answer == va.ValidAnswer {
+				return weight
+			}
+		} else {
+			if strings.EqualFold(answer, va.ValidAnswer) {
+				return weight
+			}
+		}
+	}
+
+	return 0
+}
+
+func (ctrl *cbtController) calculateMatchingScore(questionID uint, studentAnswers map[string]string, weight float64) float64 {
+	matchingPairs, err := ctrl.repo.GetMatchingPairsByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	correctCount := 0
+	for _, pair := range matchingPairs {
+		studentRight, exists := studentAnswers[fmt.Sprintf("%d", pair.MatchingID)]
+		if exists && studentRight == pair.RightText {
+			correctCount++
+		}
+	}
+
+	if len(matchingPairs) > 0 {
+		return (float64(correctCount) / float64(len(matchingPairs))) * weight
+	}
+
+	return 0
+}
+
+func timeNowPtr() *time.Time {
+	t := time.Now()
+	return &t
+}
+
+func shuffleQuestions(tempList interface{}) {
+	rand.Seed(time.Now().UnixNano())
+	// Generic shuffle using reflection or implement specific
+}

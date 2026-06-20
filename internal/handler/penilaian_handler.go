@@ -80,16 +80,35 @@ func (h *PenilaianHandler) GetNilaiMapelHandler(c *gin.Context) {
 // SaveNilaiMapelHandler - POST /penilaian/nilai/save
 func (h *PenilaianHandler) SaveNilaiMapelHandler(c *gin.Context) {
 	var req dto.NilaiMapelRequest
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	result, err := h.penilaianController.SaveNilaiMapel(req)
+	userIDRaw, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
+	userIDFloat, ok := userIDRaw.(float64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	userID := uint(userIDFloat)
+
+	result, err := h.penilaianController.SaveNilaiMapel(
+		req,
+		userID,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -271,4 +290,24 @@ func (h *PenilaianHandler) EditNilaiPerSiswaHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Nilai berhasil diupdate"})
+}
+
+// GetNilaiHistoryHandler - get /nilai/history/:raport_nilai_id
+func (h *PenilaianHandler) GetNilaiHistoryHandler(c *gin.Context) {
+	raportNilaiID, err := strconv.ParseUint(c.Param("raport_nilai_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid raport_nilai_id"})
+		return
+	}
+
+	result, err := h.penilaianController.GetNilaiHistory(uint(raportNilaiID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
 }

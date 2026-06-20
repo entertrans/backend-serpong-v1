@@ -25,6 +25,12 @@ func Register(rg *gin.RouterGroup, db *gorm.DB, cfg *config.Config) {
 		siswa.POST("/", siswaHandler.CreateSiswa)
 		siswa.PATCH("/:nis", siswaHandler.UpdateSiswa)
 		siswa.PATCH("/:nis/orangtua", siswaHandler.UpdateOrangtua)
+		// NEW: Filter by status
+		siswa.GET("/aktif", siswaHandler.GetSiswaAktif)     // GET /api/v1/siswa/aktif?page=1&limit=10&search=john
+		siswa.GET("/alumni", siswaHandler.GetSiswaAlumni)   // GET /api/v1/siswa/alumni?page=1&limit=10&search=john
+		siswa.GET("/deleted", siswaHandler.GetSiswaDeleted) // GET /api/v1/siswa/deleted?page=1&limit=10&search=john
+		// ✅ NEW: Khusus untuk frontend enrollment (tanpa pagination)
+		siswa.GET("/aktif/all", siswaHandler.GetActiveStudentsForEnrollment)
 		// Contoh kalau nanti mau tambah route:
 		// siswa.GET("/:nis", siswaHandler.GetSiswaByNIS)
 	}

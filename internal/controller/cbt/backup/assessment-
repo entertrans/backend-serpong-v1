@@ -1,0 +1,330 @@
+package cbt
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+func (ctrl *cbtController) CreateAssessment(c *gin.Context) {
+	var req dto.CreateAssessmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	if len(req.QuestionIDs) != len(req.Weights) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "jumlah question_ids dan weights harus sama"})
+		return
+	}
+
+	totalWeight := 0
+	for _, w := range req.Weights {
+		totalWeight += w
+	}
+	if totalWeight != 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "total bobot harus 100"})
+		return
+	}
+
+	if req.ActiveFrom.After(req.ActiveUntil) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "active_from harus sebelum active_until"})
+		return
+	}
+
+	assessment := &model.ToAssessment{
+		Title:                req.Title,
+		Description:          req.Description,
+		Type:                 req.Type,
+		AutoEnrollClassID:    req.AutoEnrollClassID,
+		DurationMinutes:      req.DurationMinutes,
+		IsRandomQuestion:     req.IsRandomQuestion,
+		IsRandomOption:       req.IsRandomOption,
+		TotalQuestionDisplay: req.TotalQuestionDisplay,
+		PassingScore:         req.PassingScore,
+		ActiveFrom:           req.ActiveFrom,
+		ActiveUntil:          req.ActiveUntil,
+		Instruction:          req.Instruction,
+		CreatedBy:            int(guru.GuruID),
+	}
+
+	err = ctrl.repo.CreateAssessment(assessment)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	for i, questionID := range req.QuestionIDs {
+		assessmentQuestion := &model.ToAssessmentQuestion{
+			AssessmentID: assessment.AssessmentID,
+			QuestionID:   questionID,
+			Weight:       req.Weights[i],
+		}
+		err = ctrl.repo.AddQuestionToAssessment(assessmentQuestion)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusCreated, dto.AssessmentResponse{
+		AssessmentID:         assessment.AssessmentID,
+		Title:                assessment.Title,
+		Description:          assessment.Description,
+		Type:                 assessment.Type,
+		DurationMinutes:      assessment.DurationMinutes,
+		IsRandomQuestion:     assessment.IsRandomQuestion,
+		IsRandomOption:       assessment.IsRandomOption,
+		TotalQuestionDisplay: assessment.TotalQuestionDisplay,
+		PassingScore:         assessment.PassingScore,
+		ActiveFrom:           assessment.ActiveFrom,
+		ActiveUntil:          assessment.ActiveUntil,
+		Instruction:          assessment.Instruction,
+		CreatedBy:            assessment.CreatedBy,
+		CreatedAt:            assessment.CreatedAt,
+		TotalQuestions:       len(req.QuestionIDs),
+	})
+}
+
+func (ctrl *cbtController) GetAssessmentByID(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assessment id"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	assessmentQuestions, err := ctrl.repo.GetAssessmentQuestions(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	questions := make([]dto.AssessmentQuestionDetail, 0)
+	for _, aq := range assessmentQuestions {
+		question, err := ctrl.repo.GetQuestionByID(aq.QuestionID)
+		if err != nil {
+			continue
+		}
+		questions = append(questions, dto.AssessmentQuestionDetail{
+			AssessmentQuestionID: aq.AssessmentQuestionID,
+			QuestionID:           question.QuestionID,
+			QuestionText:         question.QuestionText,
+			QuestionType:         question.QuestionType,
+			Weight:               aq.Weight,
+			FixedOrder:           aq.FixedOrder,
+		})
+	}
+
+	assessmentStudents, err := ctrl.repo.GetAssessmentStudents(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	students := make([]dto.AssessmentStudentDetail, 0)
+	for _, as := range assessmentStudents {
+		studentName := ""
+		if as.Siswa != nil && as.Siswa.SiswaNama != nil {
+			studentName = *as.Siswa.SiswaNama
+		}
+		studentNIS := ""
+		if as.Siswa != nil && as.Siswa.SiswaNIS != nil {
+			studentNIS = *as.Siswa.SiswaNIS
+		}
+		students = append(students, dto.AssessmentStudentDetail{
+			AssessmentStudentID: as.AssessmentStudentID,
+			StudentID:           as.StudentID,
+			StudentName:         studentName,
+			StudentNIS:          studentNIS,
+			EnrolledAt:          as.EnrolledAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, dto.AssessmentDetailResponse{
+		AssessmentResponse: dto.AssessmentResponse{
+			AssessmentID:         assessment.AssessmentID,
+			Title:                assessment.Title,
+			Description:          assessment.Description,
+			Type:                 assessment.Type,
+			DurationMinutes:      assessment.DurationMinutes,
+			IsRandomQuestion:     assessment.IsRandomQuestion,
+			IsRandomOption:       assessment.IsRandomOption,
+			TotalQuestionDisplay: assessment.TotalQuestionDisplay,
+			PassingScore:         assessment.PassingScore,
+			ActiveFrom:           assessment.ActiveFrom,
+			ActiveUntil:          assessment.ActiveUntil,
+			Instruction:          assessment.Instruction,
+			CreatedBy:            assessment.CreatedBy,
+			CreatedAt:            assessment.CreatedAt,
+			TotalQuestions:       len(questions),
+			TotalStudents:        len(students),
+		},
+		Questions: questions,
+		Students:  students,
+	})
+}
+
+func (ctrl *cbtController) GetAssessments(c *gin.Context) {
+	assessmentType := c.Query("type")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	assessments, total, err := ctrl.repo.GetAssessmentsByType(assessmentType, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]dto.AssessmentResponse, len(assessments))
+	for i, a := range assessments {
+		questions, _ := ctrl.repo.GetAssessmentQuestions(a.AssessmentID)
+		students, _ := ctrl.repo.GetAssessmentStudents(a.AssessmentID)
+
+		result[i] = dto.AssessmentResponse{
+			AssessmentID:         a.AssessmentID,
+			Title:                a.Title,
+			Description:          a.Description,
+			Type:                 a.Type,
+			DurationMinutes:      a.DurationMinutes,
+			IsRandomQuestion:     a.IsRandomQuestion,
+			IsRandomOption:       a.IsRandomOption,
+			TotalQuestionDisplay: a.TotalQuestionDisplay,
+			PassingScore:         a.PassingScore,
+			ActiveFrom:           a.ActiveFrom,
+			ActiveUntil:          a.ActiveUntil,
+			Instruction:          a.Instruction,
+			CreatedBy:            a.CreatedBy,
+			CreatedAt:            a.CreatedAt,
+			TotalQuestions:       len(questions),
+			TotalStudents:        len(students),
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// UpdateAssessment - Update assessment yang sudah ada
+func (ctrl *cbtController) UpdateAssessment(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assessment id"})
+		return
+	}
+
+	var req dto.UpdateAssessmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Cek apakah assessment exists
+	existingAssessment, err := ctrl.repo.GetAssessmentByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "assessment tidak ditemukan"})
+		return
+	}
+
+	// Update fields
+	if req.Title != nil {
+		existingAssessment.Title = *req.Title
+	}
+	if req.Description != nil {
+		existingAssessment.Description = req.Description
+	}
+	if req.DurationMinutes != nil {
+		existingAssessment.DurationMinutes = req.DurationMinutes
+	}
+	if req.PassingScore != nil {
+		existingAssessment.PassingScore = *req.PassingScore
+	}
+	if req.ActiveFrom != nil {
+		existingAssessment.ActiveFrom = *req.ActiveFrom
+	}
+	if req.ActiveUntil != nil {
+		existingAssessment.ActiveUntil = *req.ActiveUntil
+	}
+	if req.Instruction != nil {
+		existingAssessment.Instruction = req.Instruction
+	}
+	if req.IsRandomQuestion != nil {
+		existingAssessment.IsRandomQuestion = *req.IsRandomQuestion
+	}
+	if req.IsRandomOption != nil {
+		existingAssessment.IsRandomOption = *req.IsRandomOption
+	}
+	if req.TotalQuestionDisplay != nil {
+		existingAssessment.TotalQuestionDisplay = req.TotalQuestionDisplay
+	}
+
+	err = ctrl.repo.UpdateAssessment(existingAssessment)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Assessment berhasil diupdate",
+		"data":    existingAssessment,
+	})
+}
+
+// DeleteAssessment - Soft delete assessment
+func (ctrl *cbtController) DeleteAssessment(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assessment id"})
+		return
+	}
+
+	// Cek apakah ada attempt yang sudah dimulai
+	hasAttempts, err := ctrl.repo.HasAttempts(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if hasAttempts {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Tidak dapat menghapus assessment yang sudah memiliki attempt. Arsipkan saja.",
+		})
+		return
+	}
+
+	err = ctrl.repo.DeleteAssessment(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Assessment berhasil dihapus"})
+}

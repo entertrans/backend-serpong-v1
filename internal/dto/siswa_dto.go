@@ -92,3 +92,17 @@ type SiswaListResponse struct {
 	Data       []SiswaResponse    `json:"data"`
 	Pagination PaginationResponse `json:"pagination"`
 }
+
+// FilterSiswaStatusRequest untuk request filter berdasarkan status
+type FilterSiswaStatusRequest struct {
+	Search string `form:"search"`
+	Page   int    `form:"page"`
+	Limit  int    `form:"limit"`
+}
+
+// SiswaStatusResponse untuk response dengan status
+type SiswaStatusResponse struct {
+	Data       []SiswaResponse    `json:"data"`
+	Pagination PaginationResponse `json:"pagination"`
+	Total      int64              `json:"total"`
+}

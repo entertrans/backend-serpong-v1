@@ -131,3 +131,28 @@ func (h *KurikulumHandler) GetKurikulumByGuruHandler(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+// GetKelasWaliHandler - GET /ta-kelas-wali/:ta_id/:guru_id
+func (h *KurikulumHandler) GetKelasWaliHandler(c *gin.Context) {
+	taID, err := strconv.ParseUint(c.Param("ta_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ta_id"})
+		return
+	}
+
+	guruID, err := strconv.ParseUint(c.Param("guru_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid guru_id"})
+		return
+	}
+
+	result, err := h.kurikulumController.GetKelasWali(uint(taID), uint(guruID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": result,
+	})
+}

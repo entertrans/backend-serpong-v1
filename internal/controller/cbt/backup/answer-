@@ -1,0 +1,119 @@
+package cbt
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+func (ctrl *cbtController) SubmitAnswer(c *gin.Context) {
+	var req dto.SubmitAnswerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestion, err := ctrl.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt tidak cocok"})
+		return
+	}
+
+	switch attemptQuestion.QuestionTypeSnapshot {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		idsJSON, _ := json.Marshal(req.SelectedOptionIDs)
+		idsStr := string(idsJSON)
+		attemptQuestion.SelectedOptionIDs = &idsStr
+
+		autoScore := ctrl.calculateMCQScore(attemptQuestion.OriginalQuestionID, req.SelectedOptionIDs, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "SHORT_ANSWER":
+		attemptQuestion.AnswerText = req.AnswerText
+
+		if req.AnswerText != nil {
+			autoScore := ctrl.calculateShortAnswerScore(attemptQuestion.OriginalQuestionID, *req.AnswerText, float64(attemptQuestion.WeightSnapshot))
+			attemptQuestion.AutoScore = &autoScore
+		}
+
+	case "MATCHING":
+		matchingJSON, _ := json.Marshal(req.MatchingAnswer)
+		matchingStr := string(matchingJSON)
+		attemptQuestion.MatchingAnswerJSON = &matchingStr
+
+		autoScore := ctrl.calculateMatchingScore(attemptQuestion.OriginalQuestionID, req.MatchingAnswer, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "ESSAY":
+		if req.IsFinalSubmit {
+			attemptQuestion.EssayAnswer = req.EssayAnswer
+			attemptQuestion.EssayLastSavedAt = timeNowPtr()
+		}
+	}
+
+	err = ctrl.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attempt, _ := ctrl.repo.GetAttemptByID(req.AttemptID)
+	if attempt != nil {
+		attempt.LastActivityAt = time.Now()
+		ctrl.repo.UpdateAttempt(attempt)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "answer saved"})
+}
+
+func (ctrl *cbtController) SubmitEssayDraft(c *gin.Context) {
+	var req dto.SubmitEssayDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	attemptQuestion, err := ctrl.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt tidak cocok"})
+		return
+	}
+
+	if attemptQuestion.QuestionTypeSnapshot != "ESSAY" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hanya essay yang memiliki draft"})
+		return
+	}
+
+	attemptQuestion.EssayAnswer = &req.EssayDraft
+	attemptQuestion.EssayLastSavedAt = timeNowPtr()
+
+	err = ctrl.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log := &model.ToAutosaveLog{
+		AttemptID:         req.AttemptID,
+		AttemptQuestionID: &req.AttemptQuestionID,
+		Action:            "AUTO_SAVE_DRAFT",
+	}
+	ctrl.repo.CreateAutosaveLog(log)
+
+	c.JSON(http.StatusOK, gin.H{"message": "essay draft saved"})
+}

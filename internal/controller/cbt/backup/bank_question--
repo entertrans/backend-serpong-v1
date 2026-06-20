@@ -1,0 +1,989 @@
+package cbt
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+// ============================================
+// BANK CRUD
+// ============================================
+
+func (ctrl *cbtController) CreateBank(c *gin.Context) {
+	var req dto.CreateBankRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Gunakan "userID" (sesuai middleware)
+	userIDValue, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized - user not found"})
+		return
+	}
+
+	// Convert userID ke uint64
+	var createdBy uint64
+	switch v := userIDValue.(type) {
+	case float64:
+		createdBy = uint64(v)
+	case int:
+		createdBy = uint64(v)
+	case uint:
+		createdBy = uint64(v)
+	case int64:
+		createdBy = uint64(v)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user id type"})
+		return
+	}
+
+	bank := &model.ToQuestionBank{
+		BankName:    req.BankName,
+		KdMapel:     req.KdMapel,
+		KelasID:     req.KelasID,
+		Description: &req.Description,
+		CreatedBy:   createdBy,
+	}
+
+	if err := ctrl.db.Create(bank).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Load relasi untuk response
+	ctrl.db.Preload("User").Preload("Mapel").Preload("Kelas").First(bank, bank.BankID)
+
+	// Hitung total soal
+	var totalQuestions int64
+	ctrl.db.Model(&model.ToQuestion{}).Where("bank_id = ? AND deleted_at IS NULL", bank.BankID).Count(&totalQuestions)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Bank soal berhasil dibuat",
+		"data": dto.BankResponse{
+			BankID:         bank.BankID,
+			BankName:       bank.BankName,
+			KdMapel:        bank.KdMapel,
+			MapelName:      getMapelName(bank.Mapel),
+			KelasID:        bank.KelasID,
+			KelasName:      getKelasName(bank.Kelas),
+			Description:    bank.Description,
+			TotalQuestions: totalQuestions,
+			CreatedBy:      bank.CreatedBy,
+			CreatedByName:  getUserName(bank.User),
+			CreatedAt:      bank.CreatedAt,
+			UpdatedAt:      bank.UpdatedAt,
+		},
+	})
+}
+
+func (ctrl *cbtController) GetBanks(c *gin.Context) {
+	search := c.Query("search")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+
+	var banks []model.ToQuestionBank
+	var total int64
+
+	query := ctrl.db.Model(&model.ToQuestionBank{}).
+		Where("deleted_at IS NULL").
+		Preload("User").
+		Preload("Mapel").
+		Preload("Kelas")
+
+	if search != "" {
+		query = query.Where("bank_name LIKE ?", "%"+search+"%")
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err := query.
+		Offset(offset).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&banks).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]dto.BankResponse, len(banks))
+	for i, bank := range banks {
+		var totalQuestions int64
+		ctrl.db.Model(&model.ToQuestion{}).
+			Where("bank_id = ? AND deleted_at IS NULL", bank.BankID).
+			Count(&totalQuestions)
+
+		result[i] = dto.BankResponse{
+			BankID:         bank.BankID,
+			BankName:       bank.BankName,
+			KdMapel:        bank.KdMapel,
+			MapelName:      getMapelName(bank.Mapel),
+			KelasID:        bank.KelasID,
+			KelasName:      getKelasName(bank.Kelas),
+			Description:    bank.Description,
+			TotalQuestions: totalQuestions,
+			CreatedBy:      bank.CreatedBy,
+			CreatedByName:  getUserName(bank.User),
+			CreatedAt:      bank.CreatedAt,
+			UpdatedAt:      bank.UpdatedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+func (ctrl *cbtController) GetBankByID(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank id"})
+		return
+	}
+
+	var bank model.ToQuestionBank
+	err = ctrl.db.
+		Preload("User").
+		Preload("Mapel").
+		Preload("Kelas").
+		Where("bank_id = ? AND deleted_at IS NULL", uint(id)).
+		First(&bank).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "bank soal tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Hitung jumlah soal di bank ini
+	var totalQuestions int64
+	ctrl.db.Model(&model.ToQuestion{}).
+		Where("bank_id = ? AND deleted_at IS NULL", bank.BankID).
+		Count(&totalQuestions)
+
+	// Hitung statistik tipe soal
+	type QuestionTypeCount struct {
+		QuestionType string
+		Count        int64
+	}
+	var typeStats []QuestionTypeCount
+	ctrl.db.Model(&model.ToQuestion{}).
+		Select("question_type, count(*) as count").
+		Where("bank_id = ? AND deleted_at IS NULL", bank.BankID).
+		Group("question_type").
+		Scan(&typeStats)
+
+	questionTypes := make(map[string]int64)
+	for _, stat := range typeStats {
+		questionTypes[stat.QuestionType] = stat.Count
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": dto.BankDetailResponse{
+			BankID:         bank.BankID,
+			BankName:       bank.BankName,
+			KdMapel:        bank.KdMapel,
+			MapelName:      getMapelName(bank.Mapel),
+			KelasID:        bank.KelasID,
+			KelasName:      getKelasName(bank.Kelas),
+			Description:    bank.Description,
+			TotalQuestions: totalQuestions,
+			QuestionTypes:  questionTypes,
+			CreatedBy:      bank.CreatedBy,
+			CreatedByName:  getUserName(bank.User),
+			CreatedAt:      bank.CreatedAt,
+			UpdatedAt:      bank.UpdatedAt,
+		},
+	})
+}
+
+func (ctrl *cbtController) GetQuestionsByBank(c *gin.Context) {
+	bankIDStr := c.Param("id")
+	bankID, err := strconv.ParseUint(bankIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank id"})
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	var questions []model.ToQuestion
+	var total int64
+
+	query := ctrl.db.Model(&model.ToQuestion{}).
+		Where("bank_id = ? AND deleted_at IS NULL", uint(bankID))
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err = query.
+		Offset(offset).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&questions).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Gunakan QuestionDetailResponse agar bisa menampung details
+	result := make([]dto.QuestionDetailResponse, len(questions))
+	for i, q := range questions {
+		result[i] = dto.QuestionDetailResponse{
+			QuestionID:   q.QuestionID,
+			BankID:       q.BankID,
+			QuestionType: q.QuestionType,
+			QuestionText: q.QuestionText,
+			Explanation:  q.Explanation,
+			CreatedBy:    q.CreatedBy,
+			CreatedAt:    q.CreatedAt,
+			UpdatedAt:    q.UpdatedAt,
+		}
+
+		// Load specific data based on question type
+		switch q.QuestionType {
+		case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+			var options []model.ToQuestionOption
+			ctrl.db.Where("question_id = ?", q.QuestionID).
+				Order("sort_order ASC").
+				Find(&options)
+
+			opts := make([]dto.OptionResponse, len(options))
+			for j, opt := range options {
+				opts[j] = dto.OptionResponse{
+					OptionID:    opt.OptionID,
+					OptionLabel: opt.OptionLabel,
+					OptionText:  opt.OptionText,
+					IsCorrect:   opt.IsCorrect,
+					SortOrder:   opt.SortOrder,
+				}
+			}
+			result[i].Options = opts
+
+		case "SHORT_ANSWER":
+			var answers []model.ToQuestionShortAnswer
+			ctrl.db.Where("question_id = ?", q.QuestionID).Find(&answers)
+
+			validAnswers := make([]string, len(answers))
+			for j, ans := range answers {
+				validAnswers[j] = ans.ValidAnswer
+			}
+			result[i].ValidAnswers = validAnswers
+
+		case "MATCHING":
+			var pairs []model.ToQuestionMatching
+			ctrl.db.Where("question_id = ?", q.QuestionID).
+				Order("pair_order ASC").
+				Find(&pairs)
+
+			matchingPairs := make([]dto.MatchingPairResponse, len(pairs))
+			for j, pair := range pairs {
+				matchingPairs[j] = dto.MatchingPairResponse{
+					MatchingID: pair.MatchingID,
+					LeftText:   pair.LeftText,
+					RightText:  pair.RightText,
+					PairOrder:  pair.PairOrder,
+				}
+			}
+			result[i].MatchingPairs = matchingPairs
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+func (ctrl *cbtController) UpdateBank(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank id"})
+		return
+	}
+
+	var req dto.UpdateBankRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var bank model.ToQuestionBank
+	err = ctrl.db.Where("bank_id = ? AND deleted_at IS NULL", uint(id)).
+		First(&bank).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "bank soal tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	if req.BankName != nil {
+		bank.BankName = *req.BankName
+	}
+	if req.KdMapel != nil {
+		bank.KdMapel = *req.KdMapel
+	}
+	if req.KelasID != nil {
+		bank.KelasID = *req.KelasID
+	}
+	if req.Description != nil {
+		bank.Description = req.Description
+	}
+
+	if err := ctrl.db.Save(&bank).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctrl.db.Preload("User").Preload("Mapel").Preload("Kelas").First(&bank, bank.BankID)
+
+	var totalQuestions int64
+	ctrl.db.Model(&model.ToQuestion{}).
+		Where("bank_id = ? AND deleted_at IS NULL", bank.BankID).
+		Count(&totalQuestions)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Bank soal berhasil diupdate",
+		"data": dto.BankResponse{
+			BankID:         bank.BankID,
+			BankName:       bank.BankName,
+			KdMapel:        bank.KdMapel,
+			MapelName:      getMapelName(bank.Mapel),
+			KelasID:        bank.KelasID,
+			KelasName:      getKelasName(bank.Kelas),
+			Description:    bank.Description,
+			TotalQuestions: totalQuestions,
+			CreatedBy:      bank.CreatedBy,
+			CreatedByName:  getUserName(bank.User),
+			CreatedAt:      bank.CreatedAt,
+			UpdatedAt:      bank.UpdatedAt,
+		},
+	})
+}
+
+func (ctrl *cbtController) DeleteBank(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank id"})
+		return
+	}
+
+	var totalQuestions int64
+	ctrl.db.Model(&model.ToQuestion{}).
+		Where("bank_id = ? AND deleted_at IS NULL", uint(id)).
+		Count(&totalQuestions)
+
+	if totalQuestions > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Tidak dapat menghapus bank yang masih memiliki soal. Hapus semua soal terlebih dahulu.",
+		})
+		return
+	}
+
+	result := ctrl.db.Model(&model.ToQuestionBank{}).
+		Where("bank_id = ?", uint(id)).
+		Update("deleted_at", gorm.Expr("NOW()"))
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "bank soal tidak ditemukan"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Bank soal berhasil dihapus"})
+}
+
+// ============================================
+// QUESTION CRUD
+// ============================================
+
+func (ctrl *cbtController) CreateQuestion(c *gin.Context) {
+	var req dto.CreateQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Extract userID dari context (middleware)
+	userIDValue, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found in context"})
+		return
+	}
+
+	// Convert userID ke int
+	var createdBy int
+	switch v := userIDValue.(type) {
+	case float64:
+		createdBy = int(v)
+	case int:
+		createdBy = v
+	case uint:
+		createdBy = int(v)
+	case int64:
+		createdBy = int(v)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user id type"})
+		return
+	}
+
+	// Gunakan transaction
+	tx := ctrl.db.Begin()
+
+	// 1. Create question
+	question := &model.ToQuestion{
+		BankID:       req.BankID, // Bisa nil atau berisi bank_id
+		QuestionType: req.QuestionType,
+		QuestionText: req.QuestionText,
+		Explanation:  req.Explanation,
+		CreatedBy:    createdBy,
+	}
+
+	if err := tx.Create(question).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 2. Create specific data based on question type
+	switch req.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		if err := createOptions(tx, question.QuestionID, req.Options); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	case "SHORT_ANSWER":
+		if err := createShortAnswers(tx, question.QuestionID, req.ValidAnswers); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	case "MATCHING":
+		if err := createMatchingPairs(tx, question.QuestionID, req.MatchingPairs); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// ESSAY: no additional data needed
+	}
+
+	tx.Commit()
+
+	// Load options/answers/matching untuk response
+	response := dto.QuestionDetailResponse{
+		QuestionID:   question.QuestionID,
+		BankID:       question.BankID,
+		QuestionType: question.QuestionType,
+		QuestionText: question.QuestionText,
+		Explanation:  question.Explanation,
+		CreatedBy:    question.CreatedBy,
+		CreatedAt:    question.CreatedAt,
+		UpdatedAt:    question.UpdatedAt,
+	}
+
+	// Load specific data for response
+	switch req.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		var options []model.ToQuestionOption
+		tx.Where("question_id = ?", question.QuestionID).Order("sort_order ASC").Find(&options)
+		opts := make([]dto.OptionResponse, len(options))
+		for i, opt := range options {
+			opts[i] = dto.OptionResponse{
+				OptionID:    opt.OptionID,
+				OptionLabel: opt.OptionLabel,
+				OptionText:  opt.OptionText,
+				IsCorrect:   opt.IsCorrect,
+				SortOrder:   opt.SortOrder,
+			}
+		}
+		response.Options = opts
+	case "SHORT_ANSWER":
+		var answers []model.ToQuestionShortAnswer
+		tx.Where("question_id = ?", question.QuestionID).Find(&answers)
+		validAnswers := make([]string, len(answers))
+		for i, ans := range answers {
+			validAnswers[i] = ans.ValidAnswer
+		}
+		response.ValidAnswers = validAnswers
+	case "MATCHING":
+		var pairs []model.ToQuestionMatching
+		tx.Where("question_id = ?", question.QuestionID).Order("pair_order ASC").Find(&pairs)
+		matchingPairs := make([]dto.MatchingPairResponse, len(pairs))
+		for i, pair := range pairs {
+			matchingPairs[i] = dto.MatchingPairResponse{
+				MatchingID: pair.MatchingID,
+				LeftText:   pair.LeftText,
+				RightText:  pair.RightText,
+				PairOrder:  pair.PairOrder,
+			}
+		}
+		response.MatchingPairs = matchingPairs
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Soal berhasil dibuat",
+		"data":    response,
+	})
+}
+
+func (ctrl *cbtController) GetQuestions(c *gin.Context) {
+	bankIDStr := c.Query("bank_id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	var questions []model.ToQuestion
+	var total int64
+
+	query := ctrl.db.Model(&model.ToQuestion{}).Where("deleted_at IS NULL")
+
+	if bankIDStr != "" {
+		bankID, err := strconv.ParseUint(bankIDStr, 10, 32)
+		if err == nil {
+			query = query.Where("bank_id = ?", uint(bankID))
+		}
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err := query.
+		Offset(offset).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&questions).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]dto.QuestionResponse, len(questions))
+	for i, q := range questions {
+		result[i] = dto.QuestionResponse{
+			QuestionID:   q.QuestionID,
+			BankID:       q.BankID,
+			QuestionType: q.QuestionType,
+			QuestionText: q.QuestionText,
+			Explanation:  q.Explanation,
+			CreatedBy:    q.CreatedBy,
+			CreatedAt:    q.CreatedAt,
+			UpdatedAt:    q.UpdatedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// controller/cbt/bank_question.go
+
+func (ctrl *cbtController) GetQuestionByID(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	var question model.ToQuestion
+	err = ctrl.db.Where("question_id = ? AND deleted_at IS NULL", uint(id)).
+		First(&question).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "soal tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Gunakan QuestionDetailResponse agar bisa menampung options, validAnswers, matchingPairs
+	response := dto.QuestionDetailResponse{
+		QuestionID:   question.QuestionID,
+		BankID:       question.BankID,
+		QuestionType: question.QuestionType,
+		QuestionText: question.QuestionText,
+		Explanation:  question.Explanation,
+		CreatedBy:    question.CreatedBy,
+		CreatedAt:    question.CreatedAt,
+		UpdatedAt:    question.UpdatedAt,
+	}
+
+	// Load specific data based on question type
+	switch question.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		var options []model.ToQuestionOption
+		ctrl.db.Where("question_id = ?", question.QuestionID).
+			Order("sort_order ASC").
+			Find(&options)
+
+		opts := make([]dto.OptionResponse, len(options))
+		for i, opt := range options {
+			opts[i] = dto.OptionResponse{
+				OptionID:    opt.OptionID,
+				OptionLabel: opt.OptionLabel,
+				OptionText:  opt.OptionText,
+				IsCorrect:   opt.IsCorrect,
+				SortOrder:   opt.SortOrder,
+			}
+		}
+		response.Options = opts
+
+	case "SHORT_ANSWER":
+		var answers []model.ToQuestionShortAnswer
+		ctrl.db.Where("question_id = ?", question.QuestionID).Find(&answers)
+
+		validAnswers := make([]string, len(answers))
+		for i, ans := range answers {
+			validAnswers[i] = ans.ValidAnswer
+		}
+		response.ValidAnswers = validAnswers // Sekarang valid karena pake QuestionDetailResponse
+
+	case "MATCHING":
+		var pairs []model.ToQuestionMatching
+		ctrl.db.Where("question_id = ?", question.QuestionID).
+			Order("pair_order ASC").
+			Find(&pairs)
+
+		matchingPairs := make([]dto.MatchingPairResponse, len(pairs))
+		for i, pair := range pairs {
+			matchingPairs[i] = dto.MatchingPairResponse{
+				MatchingID: pair.MatchingID,
+				LeftText:   pair.LeftText,
+				RightText:  pair.RightText,
+				PairOrder:  pair.PairOrder,
+			}
+		}
+		response.MatchingPairs = matchingPairs // Sekarang valid karena pake QuestionDetailResponse
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+func (ctrl *cbtController) UpdateQuestion(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	// Gunakan DTO yang lebih lengkap untuk update
+	var req dto.CreateQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var question model.ToQuestion
+	err = ctrl.db.Where("question_id = ? AND deleted_at IS NULL", uint(id)).
+		First(&question).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "soal tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Mulai transaction
+	tx := ctrl.db.Begin()
+
+	// Update question basic info
+	if req.QuestionText != "" {
+		question.QuestionText = req.QuestionText
+	}
+	if req.Explanation != nil {
+		question.Explanation = req.Explanation
+	}
+	if req.BankID != nil {
+		question.BankID = req.BankID
+	}
+
+	if err := tx.Save(&question).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Delete existing related data based on question type
+	switch question.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionOption{}).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete old options: " + err.Error()})
+			return
+		}
+		// Create new options
+		if err := createOptions(tx, question.QuestionID, req.Options); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create options: " + err.Error()})
+			return
+		}
+
+	case "SHORT_ANSWER":
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionShortAnswer{}).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete old answers: " + err.Error()})
+			return
+		}
+		// Create new valid answers
+		if err := createShortAnswers(tx, question.QuestionID, req.ValidAnswers); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create answers: " + err.Error()})
+			return
+		}
+
+	case "MATCHING":
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionMatching{}).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete old matching pairs: " + err.Error()})
+			return
+		}
+		// Create new matching pairs
+		if err := createMatchingPairs(tx, question.QuestionID, req.MatchingPairs); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create matching pairs: " + err.Error()})
+			return
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit transaction: " + err.Error()})
+		return
+	}
+
+	// Load updated data untuk response
+	response := dto.QuestionDetailResponse{
+		QuestionID:   question.QuestionID,
+		BankID:       question.BankID,
+		QuestionType: question.QuestionType,
+		QuestionText: question.QuestionText,
+		Explanation:  question.Explanation,
+		CreatedBy:    question.CreatedBy,
+		CreatedAt:    question.CreatedAt,
+		UpdatedAt:    question.UpdatedAt,
+	}
+
+	// Load specific data for response
+	switch question.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		var options []model.ToQuestionOption
+		ctrl.db.Where("question_id = ?", question.QuestionID).
+			Order("sort_order ASC").
+			Find(&options)
+		opts := make([]dto.OptionResponse, len(options))
+		for i, opt := range options {
+			opts[i] = dto.OptionResponse{
+				OptionID:    opt.OptionID,
+				OptionLabel: opt.OptionLabel,
+				OptionText:  opt.OptionText,
+				IsCorrect:   opt.IsCorrect,
+				SortOrder:   opt.SortOrder,
+			}
+		}
+		response.Options = opts
+
+	case "SHORT_ANSWER":
+		var answers []model.ToQuestionShortAnswer
+		ctrl.db.Where("question_id = ?", question.QuestionID).Find(&answers)
+		validAnswers := make([]string, len(answers))
+		for i, ans := range answers {
+			validAnswers[i] = ans.ValidAnswer
+		}
+		response.ValidAnswers = validAnswers
+
+	case "MATCHING":
+		var pairs []model.ToQuestionMatching
+		ctrl.db.Where("question_id = ?", question.QuestionID).
+			Order("pair_order ASC").
+			Find(&pairs)
+		matchingPairs := make([]dto.MatchingPairResponse, len(pairs))
+		for i, pair := range pairs {
+			matchingPairs[i] = dto.MatchingPairResponse{
+				MatchingID: pair.MatchingID,
+				LeftText:   pair.LeftText,
+				RightText:  pair.RightText,
+				PairOrder:  pair.PairOrder,
+			}
+		}
+		response.MatchingPairs = matchingPairs
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Soal berhasil diupdate",
+		"data":    response,
+	})
+}
+
+func (ctrl *cbtController) DeleteQuestion(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	// var inUse int64
+	// ctrl.db.Model(&model.ToAssessmentQuestion{}).
+	// 	Where("question_id = ?", uint(id)).
+	// 	Count(&inUse)
+
+	// if inUse > 0 {
+	// 	c.JSON(http.StatusBadRequest, gin.H{
+	// 		"error": "Soal sedang digunakan di assessment. Hapus dari assessment terlebih dahulu.",
+	// 	})
+	// 	return
+	// }
+
+	result := ctrl.db.Model(&model.ToQuestion{}).
+		Where("question_id = ?", uint(id)).
+		Update("deleted_at", gorm.Expr("NOW()"))
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "soal tidak ditemukan"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Soal berhasil dihapus"})
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+func getUserName(user *model.User) string {
+	if user != nil {
+		return user.Name
+	}
+	return ""
+}
+
+func getMapelName(mapel *model.Mapel) string {
+	if mapel != nil {
+		return mapel.NmMapel
+	}
+	return ""
+}
+
+func getKelasName(kelas *model.Kelas) string {
+	if kelas != nil {
+		return kelas.KelasNama
+	}
+	return ""
+}
+
+func createOptions(tx *gorm.DB, questionID uint, options []dto.CreateOptionRequest) error {
+	if len(options) == 0 {
+		return nil
+	}
+
+	opts := make([]model.ToQuestionOption, len(options))
+	for i, opt := range options {
+		opts[i] = model.ToQuestionOption{
+			QuestionID:  questionID,
+			OptionLabel: opt.Label,
+			OptionText:  opt.Text,
+			IsCorrect:   opt.IsCorrect,
+			SortOrder:   opt.SortOrder,
+		}
+	}
+	return tx.Create(&opts).Error
+}
+
+func createShortAnswers(tx *gorm.DB, questionID uint, validAnswers []string) error {
+	if len(validAnswers) == 0 {
+		return nil
+	}
+
+	answers := make([]model.ToQuestionShortAnswer, len(validAnswers))
+	for i, ans := range validAnswers {
+		answers[i] = model.ToQuestionShortAnswer{
+			QuestionID:  questionID,
+			ValidAnswer: ans,
+		}
+	}
+	return tx.Create(&answers).Error
+}
+
+func createMatchingPairs(tx *gorm.DB, questionID uint, pairs []dto.CreateMatchingRequest) error {
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	matchingPairs := make([]model.ToQuestionMatching, len(pairs))
+	for i, pair := range pairs {
+		matchingPairs[i] = model.ToQuestionMatching{
+			QuestionID: questionID,
+			LeftText:   pair.LeftText,
+			RightText:  pair.RightText,
+			PairOrder:  pair.PairOrder,
+		}
+	}
+	return tx.Create(&matchingPairs).Error
+}

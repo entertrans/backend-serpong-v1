@@ -1,0 +1,144 @@
+package cbt
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+)
+
+func (ctrl *cbtController) ReviewEssay(c *gin.Context) {
+	var req dto.ReviewEssayRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	attemptQuestion, err := ctrl.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "attempt tidak cocok"})
+		return
+	}
+
+	if attemptQuestion.QuestionTypeSnapshot != "ESSAY" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hanya essay yang bisa direview"})
+		return
+	}
+
+	attemptQuestion.TeacherScore = &req.TeacherScore
+	attemptQuestion.TeacherNote = &req.TeacherNote
+	attemptQuestion.ReviewStatus = "APPROVED"
+	attemptQuestion.ReviewedAt = timeNowPtr()
+	reviewedBy := int(guru.GuruID)
+	attemptQuestion.ReviewedBy = &reviewedBy
+
+	err = ctrl.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	err = ctrl.updateAttemptAfterReview(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "essay reviewed"})
+}
+
+func (ctrl *cbtController) updateAttemptAfterReview(attemptID uint) error {
+	attempt, err := ctrl.repo.GetAttemptByID(attemptID)
+	if err != nil {
+		return err
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		return err
+	}
+
+	attemptQuestions, err := ctrl.repo.GetAttemptQuestions(attemptID)
+	if err != nil {
+		return err
+	}
+
+	totalScore, totalWeight := ctrl.calculateTotalScore(attemptQuestions)
+	finalScore := (totalScore / float64(totalWeight)) * 100
+	isPassed := finalScore >= assessment.PassingScore
+
+	hasPendingEssay := false
+	for _, aq := range attemptQuestions {
+		if aq.QuestionTypeSnapshot == "ESSAY" && aq.ReviewStatus == "PENDING" {
+			hasPendingEssay = true
+			break
+		}
+	}
+
+	if !hasPendingEssay {
+		attempt.Status = "COMPLETED"
+	}
+
+	attempt.FinalScore = &finalScore
+	attempt.IsPassed = &isPassed
+
+	return ctrl.repo.UpdateAttempt(attempt)
+}
+
+func (ctrl *cbtController) OverrideScore(c *gin.Context) {
+	var req dto.OverrideScoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	guru, err := ctrl.getGuruByUserID(userID.(int))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guru tidak ditemukan"})
+		return
+	}
+
+	attempt, err := ctrl.repo.GetAttemptByID(req.AttemptID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+		return
+	}
+
+	assessment, err := ctrl.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attempt.IsOverride = true
+	attempt.OverrideScore = &req.NewScore
+	attempt.OverrideReason = &req.Reason
+	overriddenBy := int(guru.GuruID)
+	attempt.OverriddenBy = &overriddenBy
+	attempt.OverriddenAt = timeNowPtr()
+	attempt.FinalScore = &req.NewScore
+	isPassed := req.NewScore >= assessment.PassingScore
+	attempt.IsPassed = &isPassed
+
+	err = ctrl.repo.UpdateAttempt(attempt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "score overridden"})
+}

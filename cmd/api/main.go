@@ -11,6 +11,7 @@ import (
 	"github.com/entertrans/backend-bogor.git/internal/config" // <-- ADD THIS
 	authmodule "github.com/entertrans/backend-bogor.git/internal/modules/auth"
 	avatarmodule "github.com/entertrans/backend-bogor.git/internal/modules/avatar"
+	cbtmodule "github.com/entertrans/backend-bogor.git/internal/modules/cbt"
 	financemodule "github.com/entertrans/backend-bogor.git/internal/modules/finance"
 	lampiranmodule "github.com/entertrans/backend-bogor.git/internal/modules/lampiran"
 	masterdatamodule "github.com/entertrans/backend-bogor.git/internal/modules/masterdata"
@@ -57,6 +58,7 @@ func main() {
 		avatarmodule.Register,
 		rapor.Register,
 		financemodule.Register,
+		cbtmodule.Register,
 	)
 
 	port := ":" + cfg.AppPort

@@ -3,6 +3,7 @@ package controller
 
 import (
 	"errors"
+	"time"
 
 	"github.com/entertrans/backend-bogor.git/internal/dto"
 	"github.com/entertrans/backend-bogor.git/internal/model"
@@ -12,27 +13,24 @@ import (
 // internal/modules/rapor/controller/penilaian_controller.go
 
 type PenilaianController interface {
-	// Untuk dropdown dan data awal
 	GetSiswaByKelas(taID, kelasID uint) ([]dto.SiswaByKelasResponse, error)
 	GetRaportBySiswa(taID, kelasID uint, siswaNIS string) (dto.RaportResponse, error)
 
-	// Nilai Mapel
 	GetNilaiMapel(taID, taKelasMapelID uint, kelasID uint) ([]dto.GetNilaiMapelResponse, error)
-	SaveNilaiMapel(req dto.NilaiMapelRequest) (dto.NilaiMapelResponse, error)
 
-	// Absensi & Catatan
+	SaveNilaiMapel(
+		req dto.NilaiMapelRequest,
+		userID uint,
+	) (dto.NilaiMapelResponse, error)
+
 	GetAbsensi(taID, kelasID uint) ([]dto.AbsensiItem, error)
 	SaveAbsensi(req dto.AbsensiRequest) (dto.AbsensiResponse, error)
 
-	// Ekskul
 	GetEkskul(taID, kelasID uint, siswaNIS string) ([]dto.EkskulItem, error)
 	SaveEkskul(req dto.EkskulRequest) (dto.EkskulResponse, error)
 
-	// ==================== TAMBAHKAN INI ====================
-	// Update status publish per siswa
 	UpdateStatusPublish(taID, kelasID uint, siswaNIS string, statusPublish int) error
-
-	// Edit nilai per siswa (force majeur)
+	GetNilaiHistory(raportNilaiID uint) ([]dto.NilaiHistoryResponse, error)
 	EditNilaiPerSiswa(req dto.EditNilaiPerSiswaRequest) error
 }
 
@@ -150,22 +148,46 @@ func (c *penilaianController) GetNilaiMapel(taID, taKelasMapelID uint, kelasID u
 
 		raportID, exists := raportMap[siswaNIS]
 		if !exists {
+			// Jika raport tidak ada, tetap tampilkan siswa dengan nilai kosong
+			result = append(result, dto.GetNilaiMapelResponse{
+				RaportNilaiID: 0, // 0 berarti belum ada nilai
+				SiswaNIS:      siswaNIS,
+				SiswaNama:     siswaNama,
+				NilaiAngka:    0,
+				Deskripsi:     "",
+			})
 			continue
 		}
 
-		nilai := nilaiMap[raportID]
-		result = append(result, dto.GetNilaiMapelResponse{
-			SiswaNIS:   siswaNIS,
-			SiswaNama:  siswaNama,
-			NilaiAngka: nilai.NilaiAngka,
-			Deskripsi:  nilai.Deskripsi,
-		})
+		nilai, hasNilai := nilaiMap[raportID]
+		if hasNilai {
+			// Sudah ada nilai
+			result = append(result, dto.GetNilaiMapelResponse{
+				RaportNilaiID: nilai.RaportNilaiID,
+				SiswaNIS:      siswaNIS,
+				SiswaNama:     siswaNama,
+				NilaiAngka:    nilai.NilaiAngka,
+				Deskripsi:     nilai.Deskripsi,
+			})
+		} else {
+			// Belum ada nilai, tapi raport sudah ada
+			result = append(result, dto.GetNilaiMapelResponse{
+				RaportNilaiID: 0, // 0 berarti belum ada nilai
+				SiswaNIS:      siswaNIS,
+				SiswaNama:     siswaNama,
+				NilaiAngka:    0,
+				Deskripsi:     "",
+			})
+		}
 	}
 
 	return result, nil
 }
 
-func (c *penilaianController) SaveNilaiMapel(req dto.NilaiMapelRequest) (dto.NilaiMapelResponse, error) {
+func (c *penilaianController) SaveNilaiMapel(
+	req dto.NilaiMapelRequest,
+	userID uint,
+) (dto.NilaiMapelResponse, error) {
 	tx := c.db.Begin()
 	defer func() {
 		if r := recover(); r != nil {
@@ -204,6 +226,11 @@ func (c *penilaianController) SaveNilaiMapel(req dto.NilaiMapelRequest) (dto.Nil
 		nilaiHuruf := konversiNilaiHuruf(item.NilaiAngka)
 		predikat := konversiPredikat(item.NilaiAngka)
 
+		if err != nil {
+			tx.Rollback()
+			return dto.NilaiMapelResponse{}, err
+		}
+
 		// Cek apakah nilai sudah ada
 		var existing model.RaportNilai
 		err = tx.Where("raport_id = ? AND ta_kelas_mapel_id = ?",
@@ -219,14 +246,40 @@ func (c *penilaianController) SaveNilaiMapel(req dto.NilaiMapelRequest) (dto.Nil
 				NilaiHuruf:     nilaiHuruf,
 				Predikat:       predikat,
 				Deskripsi:      item.Deskripsi,
+
+				CreatedBy: &userID,
 			}
 			err = tx.Create(&nilai).Error
 		} else if err == nil {
-			// Update existing
+			// existing.LogUpdate = datatypes.JSON(logJSON)
+			nilaiChanged := existing.NilaiAngka != item.NilaiAngka
+
+			shouldAudit :=
+				nilaiChanged &&
+					!(existing.NilaiAngka == 0 && item.NilaiAngka > 0)
+
+			if shouldAudit {
+
+				audit := model.RaportNilaiAudit{
+					RaportNilaiID: existing.RaportNilaiID,
+					OldValue:      existing.NilaiAngka,
+					NewValue:      item.NilaiAngka,
+					ChangedBy:     userID,
+					ChangedAt:     time.Now(),
+				}
+
+				if err := tx.Create(&audit).Error; err != nil {
+					tx.Rollback()
+					return dto.NilaiMapelResponse{}, err
+				}
+			}
+
+			existing.UpdatedBy = &userID
 			existing.NilaiAngka = item.NilaiAngka
 			existing.NilaiHuruf = nilaiHuruf
 			existing.Predikat = predikat
 			existing.Deskripsi = item.Deskripsi
+
 			err = tx.Save(&existing).Error
 		}
 
@@ -474,20 +527,6 @@ func (c *penilaianController) GetRaportBySiswa(taID, kelasID uint, siswaNIS stri
 	if err != nil {
 		return dto.RaportResponse{}, err
 	}
-
-	// for _, n := range nilaiMapel {
-	// 	log.Printf("DEBUG: TaKelasMapelID=%d, Mapel exists=%v",
-	// 		n.TaKelasMapelID,
-	// 		n.TaKelasMapel.Mapel.KdMapel != 0)
-	// 	if n.TaKelasMapel.Mapel.KdMapel != 0 {
-	// 		log.Printf("DEBUG: Mapel=%s, Kelompok='%s'",
-	// 			n.TaKelasMapel.Mapel.NmMapel,
-	// 			n.TaKelasMapel.Mapel.Kelompok)
-	// 	} else {
-	// 		log.Printf("DEBUG: Mapel tidak terload untuk TaKelasMapelID=%d", n.TaKelasMapelID)
-	// 	}
-	// }
-
 	// Konversi nilai mapel (dengan pengecekan yang benar)
 	nilaiMapelResp := make([]dto.NilaiMapelDetail, 0, len(nilaiMapel))
 	for _, n := range nilaiMapel {
@@ -576,6 +615,60 @@ func (c *penilaianController) GetRaportBySiswa(taID, kelasID uint, siswaNIS stri
 	}, nil
 }
 
+// ==================== GetNilaiHistory ====================
+func (c *penilaianController) GetNilaiHistory(raportNilaiID uint) ([]dto.NilaiHistoryResponse, error) {
+	var audits []model.RaportNilaiAudit
+
+	// Ambil data audit join dengan users
+	err := c.db.Table("tbl_raport_nilai_audit").
+		Select("tbl_raport_nilai_audit.*, users.name, users.role").
+		Joins("LEFT JOIN users ON users.id = tbl_raport_nilai_audit.changed_by").
+		Where("tbl_raport_nilai_audit.raport_nilai_id = ?", raportNilaiID).
+		Order("tbl_raport_nilai_audit.changed_at DESC").
+		Find(&audits).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Konversi ke DTO
+	result := make([]dto.NilaiHistoryResponse, 0, len(audits))
+	for _, audit := range audits {
+		// Ambil user info dari hasil join
+		var userName string
+		var userRole string
+
+		// Query manual untuk ambil user info karena GORM tidak auto-populate
+		var user model.User
+		err := c.db.Where("id = ?", audit.ChangedBy).First(&user).Error
+		if err == nil {
+			userName = user.Name
+			userRole = user.Role
+		}
+
+		// Handle old_value yang mungkin NULL
+		var oldValue *float64
+		if audit.OldValue != 0 {
+			oldValue = &audit.OldValue
+		}
+
+		result = append(result, dto.NilaiHistoryResponse{
+			AuditID:   audit.AuditID,
+			OldValue:  oldValue,
+			NewValue:  audit.NewValue,
+			ChangedBy: audit.ChangedBy,
+			ChangedByUser: dto.UserInfo{
+				ID:   audit.ChangedBy,
+				Name: userName,
+				Role: userRole,
+			},
+			ChangedAt: audit.ChangedAt,
+		})
+	}
+
+	return result, nil
+}
+
 // ==================== STATUS PUBLISH EDIT ETC ====================
 // UpdateStatusPublish - update status_publish per siswa
 func (c *penilaianController) UpdateStatusPublish(taID, kelasID uint, siswaNIS string, statusPublish int) error {
@@ -607,18 +700,21 @@ func (c *penilaianController) UpdateStatusPublish(taID, kelasID uint, siswaNIS s
 // EditNilaiPerSiswa - edit nilai untuk satu siswa (force majeur)
 func (c *penilaianController) EditNilaiPerSiswa(req dto.EditNilaiPerSiswaRequest) error {
 	tx := c.db.Begin()
+
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
 		}
 	}()
 
-	// Update nilai mapel
 	for _, item := range req.NilaiList {
 		var nilai model.RaportNilai
-		err := tx.Where("raport_id = ? AND ta_kelas_mapel_id = ?",
-			req.RaportID, item.TaKelasMapelID).
-			First(&nilai).Error
+
+		err := tx.Where(
+			"raport_id = ? AND ta_kelas_mapel_id = ?",
+			req.RaportID,
+			item.TaKelasMapelID,
+		).First(&nilai).Error
 
 		if err != nil {
 			tx.Rollback()

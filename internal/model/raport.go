@@ -1,7 +1,9 @@
 // internal/model/raport.go
 package model
 
-import "time"
+import (
+	"time"
+)
 
 type Raport struct {
 	RaportID         uint      `gorm:"column:raport_id;primaryKey;autoIncrement" json:"raport_id"`
@@ -29,15 +31,22 @@ func (Raport) TableName() string {
 }
 
 type RaportNilai struct {
-	RaportNilaiID  uint      `gorm:"column:raport_nilai_id;primaryKey;autoIncrement" json:"raport_nilai_id"`
-	RaportID       uint      `gorm:"column:raport_id;not null" json:"raport_id"`
-	TaKelasMapelID uint      `gorm:"column:ta_kelas_mapel_id;not null" json:"ta_kelas_mapel_id"`
-	NilaiAngka     float64   `gorm:"column:nilai_angka;type:decimal(5,2);default:0.00" json:"nilai_angka"`
-	NilaiHuruf     string    `gorm:"column:nilai_huruf;size:5" json:"nilai_huruf"`
-	Predikat       string    `gorm:"column:predikat;size:255" json:"predikat"`
-	Deskripsi      string    `gorm:"column:deskripsi;type:text" json:"deskripsi"`
-	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	RaportNilaiID  uint `gorm:"column:raport_nilai_id;primaryKey;autoIncrement" json:"raport_nilai_id"`
+	RaportID       uint `gorm:"column:raport_id;not null" json:"raport_id"`
+	TaKelasMapelID uint `gorm:"column:ta_kelas_mapel_id;not null" json:"ta_kelas_mapel_id"`
 
+	NilaiAngka float64 `gorm:"column:nilai_angka;type:decimal(5,2);default:0.00" json:"nilai_angka"`
+	NilaiHuruf string  `gorm:"column:nilai_huruf;size:5" json:"nilai_huruf"`
+	Predikat   string  `gorm:"column:predikat;size:255" json:"predikat"`
+	Deskripsi  string  `gorm:"column:deskripsi;type:text" json:"deskripsi"`
+
+	CreatedBy *uint `gorm:"column:created_by"`
+	UpdatedBy *uint
+
+	LastChangedBy *uint      `gorm:"column:last_changed_by"`
+	LastChangedAt *time.Time `gorm:"column:last_changed_at"`
+
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	// Relasi
 	Raport       Raport       `gorm:"foreignKey:RaportID;references:RaportID" json:"raport,omitempty"`
 	TaKelasMapel TaKelasMapel `gorm:"foreignKey:TaKelasMapelID;references:TaKelasMapelID" json:"ta_kelas_mapel,omitempty"`
@@ -45,6 +54,22 @@ type RaportNilai struct {
 
 func (RaportNilai) TableName() string {
 	return "tbl_raport_nilai"
+}
+
+type RaportNilaiAudit struct {
+	AuditID uint `gorm:"primaryKey"`
+
+	RaportNilaiID uint
+
+	OldValue float64
+	NewValue float64
+
+	ChangedBy uint
+	ChangedAt time.Time
+}
+
+func (RaportNilaiAudit) TableName() string {
+	return "tbl_raport_nilai_audit"
 }
 
 type RaportEkskul struct {

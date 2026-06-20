@@ -1,0 +1,220 @@
+package dto
+
+import "time"
+
+// ============================================
+// ASSESSMENT DTO
+// ============================================
+
+type CreateAssessmentRequest struct {
+	Title                string    `json:"title" binding:"required"`
+	Description          *string   `json:"description,omitempty"`
+	Type                 string    `json:"type" binding:"required,oneof=UB QUIZ UTS UAS TASK"`
+	AutoEnrollClassID    *int      `json:"auto_enroll_class_id,omitempty"`
+	DurationMinutes      *int      `json:"duration_minutes,omitempty"`
+	IsRandomQuestion     bool      `json:"is_random_question"`
+	IsRandomOption       bool      `json:"is_random_option"`
+	TotalQuestionDisplay *int      `json:"total_question_displayed,omitempty"`
+	PassingScore         float64   `json:"passing_score"`
+	ActiveFrom           time.Time `json:"active_from" binding:"required"`
+	ActiveUntil          time.Time `json:"active_until" binding:"required"`
+	Instruction          *string   `json:"instruction,omitempty"`
+	QuestionIDs          []uint    `json:"question_ids" binding:"required"`
+	Weights              []int     `json:"weights" binding:"required"`
+}
+
+type AssessmentResponse struct {
+	AssessmentID         uint      `json:"assessment_id"`
+	Title                string    `json:"title"`
+	Description          *string   `json:"description,omitempty"`
+	Type                 string    `json:"type"`
+	DurationMinutes      *int      `json:"duration_minutes,omitempty"`
+	IsRandomQuestion     bool      `json:"is_random_question"`
+	IsRandomOption       bool      `json:"is_random_option"`
+	TotalQuestionDisplay *int      `json:"total_question_displayed,omitempty"`
+	PassingScore         float64   `json:"passing_score"`
+	ActiveFrom           time.Time `json:"active_from"`
+	ActiveUntil          time.Time `json:"active_until"`
+	Instruction          *string   `json:"instruction,omitempty"`
+	CreatedBy            int       `json:"created_by"`
+	CreatedAt            time.Time `json:"created_at"`
+	TotalQuestions       int       `json:"total_questions"`
+	TotalStudents        int       `json:"total_students"`
+}
+
+type AssessmentDetailResponse struct {
+	AssessmentResponse
+	Questions []AssessmentQuestionDetail `json:"questions"`
+	Students  []AssessmentStudentDetail  `json:"students,omitempty"`
+}
+
+type AssessmentQuestionDetail struct {
+	AssessmentQuestionID uint   `json:"assessment_question_id"`
+	QuestionID           uint   `json:"question_id"`
+	QuestionText         string `json:"question_text"`
+	QuestionType         string `json:"question_type"`
+	Weight               int    `json:"weight"`
+	FixedOrder           *int   `json:"fixed_order,omitempty"`
+}
+
+type AssessmentStudentDetail struct {
+	AssessmentStudentID uint      `json:"assessment_student_id"`
+	StudentID           int       `json:"student_id"`
+	StudentName         string    `json:"student_name"`
+	StudentNIS          string    `json:"student_nis"`
+	EnrolledAt          time.Time `json:"enrolled_at"`
+	Status              string    `json:"status"`
+	Score               *float64  `json:"score,omitempty"`
+}
+
+// ============================================
+// ATTEMPT DTO
+// ============================================
+
+type StartAttemptRequest struct {
+	AssessmentID uint   `json:"assessment_id" binding:"required"`
+	DeviceInfo   string `json:"device_info,omitempty"`
+	IPAddress    string `json:"ip_address,omitempty"`
+}
+
+type StartAttemptResponse struct {
+	AttemptID       uint               `json:"attempt_id"`
+	AssessmentID    uint               `json:"assessment_id"`
+	AssessmentType  string             `json:"assessment_type"`
+	Title           string             `json:"title"`
+	DurationMinutes *int               `json:"duration_minutes,omitempty"`
+	StartedAt       time.Time          `json:"started_at"`
+	Questions       []QuestionSnapshot `json:"questions"`
+}
+
+type QuestionSnapshot struct {
+	AttemptQuestionID uint                   `json:"attempt_question_id"`
+	DisplayOrder      int                    `json:"display_order"`
+	QuestionText      string                 `json:"question_text"`
+	QuestionType      string                 `json:"question_type"`
+	Weight            int                    `json:"weight"`
+	Options           []OptionSnapshot       `json:"options,omitempty"`
+	MatchingPairs     []MatchingPairSnapshot `json:"matching_pairs,omitempty"`
+	SavedAnswer       interface{}            `json:"saved_answer,omitempty"`
+}
+
+type OptionSnapshot struct {
+	OptionID  uint   `json:"option_id"`
+	Label     string `json:"label"`
+	Text      string `json:"text"`
+	IsCorrect bool   `json:"is_correct"`
+}
+
+type MatchingPairSnapshot struct {
+	MatchingID uint   `json:"matching_id"`
+	LeftText   string `json:"left_text"`
+	RightText  string `json:"right_text"`
+	PairOrder  int    `json:"pair_order"`
+}
+
+type ResumeAttemptResponse struct {
+	AttemptID        uint               `json:"attempt_id"`
+	AssessmentID     uint               `json:"assessment_id"`
+	Title            string             `json:"title"`
+	RemainingMinutes *int               `json:"remaining_minutes,omitempty"`
+	Questions        []QuestionSnapshot `json:"questions"`
+}
+
+// ============================================
+// SUBMIT ANSWER DTO
+// ============================================
+
+type SubmitAnswerRequest struct {
+	AttemptID         uint              `json:"attempt_id" binding:"required"`
+	AttemptQuestionID uint              `json:"attempt_question_id" binding:"required"`
+	SelectedOptionIDs []uint            `json:"selected_option_ids,omitempty"`
+	AnswerText        *string           `json:"answer_text,omitempty"`
+	MatchingAnswer    map[string]string `json:"matching_answer,omitempty"`
+	EssayAnswer       *string           `json:"essay_answer,omitempty"`
+	IsFinalSubmit     bool              `json:"is_final_submit"`
+}
+
+type SubmitEssayDraftRequest struct {
+	AttemptID         uint   `json:"attempt_id" binding:"required"`
+	AttemptQuestionID uint   `json:"attempt_question_id" binding:"required"`
+	EssayDraft        string `json:"essay_draft" binding:"required"`
+}
+
+type SubmitAssessmentRequest struct {
+	AttemptID uint `json:"attempt_id" binding:"required"`
+}
+
+// ============================================
+// REVIEW DTO
+// ============================================
+
+type ReviewEssayRequest struct {
+	AttemptID         uint    `json:"attempt_id" binding:"required"`
+	AttemptQuestionID uint    `json:"attempt_question_id" binding:"required"`
+	TeacherScore      float64 `json:"teacher_score" binding:"required,min=0,max=100"`
+	TeacherNote       string  `json:"teacher_note,omitempty"`
+}
+
+type OverrideScoreRequest struct {
+	AttemptID uint    `json:"attempt_id" binding:"required"`
+	NewScore  float64 `json:"new_score" binding:"required,min=0,max=100"`
+	Reason    string  `json:"reason" binding:"required"`
+}
+
+// ============================================
+// BANK & QUESTION DTO
+// ============================================
+
+type CreateBankRequest struct {
+	BankName   string  `json:"bank_name" binding:"required"`
+	Subject    *string `json:"subject,omitempty"`
+	SubjectCat *string `json:"subject_category,omitempty"`
+}
+
+type BankResponse struct {
+	BankID    uint      `json:"bank_id"`
+	BankName  string    `json:"bank_name"`
+	Subject   *string   `json:"subject,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type CreateQuestionRequest struct {
+	BankID          *uint   `json:"bank_id,omitempty"`
+	QuestionType    string  `json:"question_type" binding:"required,oneof=MCQ MULTI_MCQ TRUE_FALSE SHORT_ANSWER ESSAY MATCHING"`
+	QuestionText    string  `json:"question_text" binding:"required"`
+	Explanation     *string `json:"explanation,omitempty"`
+	DifficultyLevel string  `json:"difficulty_level,omitempty"`
+
+	Options       []QuestionOptionRequest `json:"options,omitempty"`
+	ValidAnswers  []string                `json:"valid_answers,omitempty"`
+	CaseSensitive bool                    `json:"case_sensitive,omitempty"`
+	MatchingPairs []MatchingPairRequest   `json:"matching_pairs,omitempty"`
+}
+
+type QuestionOptionRequest struct {
+	Label     string `json:"label" binding:"required"`
+	Text      string `json:"text" binding:"required"`
+	IsCorrect bool   `json:"is_correct"`
+	SortOrder int    `json:"sort_order"`
+}
+
+type MatchingPairRequest struct {
+	LeftText  string `json:"left_text" binding:"required"`
+	RightText string `json:"right_text" binding:"required"`
+	PairOrder int    `json:"pair_order"`
+}
+
+type QuestionResponse struct {
+	QuestionID      uint      `json:"question_id"`
+	BankID          *uint     `json:"bank_id,omitempty"`
+	QuestionType    string    `json:"question_type"`
+	QuestionText    string    `json:"question_text"`
+	Explanation     *string   `json:"explanation,omitempty"`
+	DifficultyLevel string    `json:"difficulty_level"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type EnrollStudentsRequest struct {
+	AssessmentID uint  `json:"assessment_id" binding:"required"`
+	StudentIDs   []int `json:"student_ids" binding:"required"`
+}

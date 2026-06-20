@@ -1,6 +1,8 @@
 // internal/modules/rapor/dto/penilaian_dto.go
 package dto
 
+import "time"
+
 // ==================== DTO UNTUK SISWA ====================
 
 type SiswaByKelasResponse struct {
@@ -34,10 +36,11 @@ type NilaiMapelResponse struct {
 // ==================== DTO UNTUK NILAI MAPEL (GET) ====================
 
 type GetNilaiMapelResponse struct {
-	SiswaNIS   string  `json:"siswa_nis"`
-	SiswaNama  string  `json:"siswa_nama"`
-	NilaiAngka float64 `json:"nilai_angka"`
-	Deskripsi  string  `json:"deskripsi"`
+	RaportNilaiID uint    `json:"raport_nilai_id"` // TAMBAHKAN ini
+	SiswaNIS      string  `json:"siswa_nis"`
+	SiswaNama     string  `json:"siswa_nama"`
+	NilaiAngka    float64 `json:"nilai_angka"`
+	Deskripsi     string  `json:"deskripsi"`
 }
 
 // ==================== DTO UNTUK ABSENSI & CATATAN ====================
@@ -132,4 +135,25 @@ type EditNilaiPerSiswaItem struct {
 
 type UpdateStatusPublishRequest struct {
 	StatusPublish int `json:"status_publish"` // hapus binding dulu
+}
+
+// ==================== DTO UNTUK HISTORY NILAI ====================
+
+type NilaiHistoryResponse struct {
+	AuditID       uint      `json:"audit_id"`
+	OldValue      *float64  `json:"old_value"`
+	NewValue      float64   `json:"new_value"`
+	ChangedBy     uint      `json:"changed_by"`
+	ChangedByUser UserInfo  `json:"changed_by_user"`
+	ChangedAt     time.Time `json:"changed_at"`
+}
+
+type UserInfo struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type GetNilaiHistoryRequest struct {
+	RaportNilaiID uint `json:"raport_nilai_id" binding:"required"`
 }

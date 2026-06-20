@@ -1,0 +1,968 @@
+package service
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+	"github.com/entertrans/backend-bogor.git/internal/repository"
+)
+
+type CBTService interface {
+	// Assessment
+	CreateAssessment(req *dto.CreateAssessmentRequest, teacherID int) (*dto.AssessmentResponse, error)
+	GetAssessmentByID(id uint) (*dto.AssessmentDetailResponse, error)
+	GetAssessments(assessmentType string, page, limit int) ([]dto.AssessmentResponse, int64, error)
+
+	// Bank & Question
+	CreateBank(req *dto.CreateBankRequest, teacherID int) (*dto.BankResponse, error)
+	CreateQuestion(req *dto.CreateQuestionRequest, teacherID int) (*dto.QuestionResponse, error)
+
+	// Enrollment
+	EnrollStudents(assessmentID uint, studentIDs []int) error
+
+	// Attempt
+	StartAttempt(studentID int, req *dto.StartAttemptRequest) (*dto.StartAttemptResponse, error)
+	ResumeAttempt(attemptID uint) (*dto.ResumeAttemptResponse, error)
+
+	// Answer
+	SubmitAnswer(req *dto.SubmitAnswerRequest) error
+	SubmitEssayDraft(req *dto.SubmitEssayDraftRequest) error
+	SubmitAssessment(attemptID uint) error
+
+	// Review
+	ReviewEssay(req *dto.ReviewEssayRequest, teacherID int) error
+	OverrideScore(req *dto.OverrideScoreRequest, teacherID int) error
+}
+
+type cbtService struct {
+	repo repository.CBTRepository
+}
+
+func NewCBTService(repo repository.CBTRepository) CBTService {
+	return &cbtService{repo: repo}
+}
+
+// ============================================
+// ASSESSMENT SERVICE
+// ============================================
+
+func (s *cbtService) CreateAssessment(req *dto.CreateAssessmentRequest, teacherID int) (*dto.AssessmentResponse, error) {
+	// Validasi jumlah soal
+	if len(req.QuestionIDs) != len(req.Weights) {
+		return nil, errors.New("jumlah question_ids dan weights harus sama")
+	}
+
+	// Hitung total bobot
+	totalWeight := 0
+	for _, w := range req.Weights {
+		totalWeight += w
+	}
+	if totalWeight != 100 {
+		return nil, errors.New("total bobot harus 100")
+	}
+
+	// Validasi tanggal
+	if req.ActiveFrom.After(req.ActiveUntil) {
+		return nil, errors.New("active_from harus sebelum active_until")
+	}
+
+	// Buat assessment
+	assessment := &model.ToAssessment{
+		Title:                req.Title,
+		Description:          req.Description,
+		Type:                 req.Type,
+		AutoEnrollClassID:    req.AutoEnrollClassID,
+		DurationMinutes:      req.DurationMinutes,
+		IsRandomQuestion:     req.IsRandomQuestion,
+		IsRandomOption:       req.IsRandomOption,
+		TotalQuestionDisplay: req.TotalQuestionDisplay,
+		PassingScore:         req.PassingScore,
+		ActiveFrom:           req.ActiveFrom,
+		ActiveUntil:          req.ActiveUntil,
+		Instruction:          req.Instruction,
+		CreatedBy:            teacherID,
+	}
+
+	err := s.repo.CreateAssessment(assessment)
+	if err != nil {
+		return nil, err
+	}
+
+	// Tambahkan soal ke assessment
+	for i, questionID := range req.QuestionIDs {
+		assessmentQuestion := &model.ToAssessmentQuestion{
+			AssessmentID: assessment.AssessmentID,
+			QuestionID:   questionID,
+			Weight:       req.Weights[i],
+		}
+		err = s.repo.AddQuestionToAssessment(assessmentQuestion)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Auto enroll jika ada auto_enroll_class_id
+	if req.AutoEnrollClassID != nil {
+		// TODO: Ambil daftar siswa berdasarkan class_id dari tabel tbl_siswa
+		// Untuk sementara, ini hanya placeholder
+	}
+
+	return &dto.AssessmentResponse{
+		AssessmentID:         assessment.AssessmentID,
+		Title:                assessment.Title,
+		Description:          assessment.Description,
+		Type:                 assessment.Type,
+		DurationMinutes:      assessment.DurationMinutes,
+		IsRandomQuestion:     assessment.IsRandomQuestion,
+		IsRandomOption:       assessment.IsRandomOption,
+		TotalQuestionDisplay: assessment.TotalQuestionDisplay,
+		PassingScore:         assessment.PassingScore,
+		ActiveFrom:           assessment.ActiveFrom,
+		ActiveUntil:          assessment.ActiveUntil,
+		Instruction:          assessment.Instruction,
+		CreatedBy:            assessment.CreatedBy,
+		CreatedAt:            assessment.CreatedAt,
+		TotalQuestions:       len(req.QuestionIDs),
+	}, nil
+}
+
+func (s *cbtService) GetAssessmentByID(id uint) (*dto.AssessmentDetailResponse, error) {
+	assessment, err := s.repo.GetAssessmentByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ambil soal-soal assessment
+	assessmentQuestions, err := s.repo.GetAssessmentQuestions(id)
+	if err != nil {
+		return nil, err
+	}
+
+	questions := make([]dto.AssessmentQuestionDetail, 0)
+	for _, aq := range assessmentQuestions {
+		question, err := s.repo.GetQuestionByID(aq.QuestionID)
+		if err != nil {
+			continue
+		}
+		questions = append(questions, dto.AssessmentQuestionDetail{
+			AssessmentQuestionID: aq.AssessmentQuestionID,
+			QuestionID:           question.QuestionID,
+			QuestionText:         question.QuestionText,
+			QuestionType:         question.QuestionType,
+			Weight:               aq.Weight,
+			FixedOrder:           aq.FixedOrder,
+		})
+	}
+
+	// Ambil siswa yang terdaftar
+	assessmentStudents, err := s.repo.GetAssessmentStudents(id)
+	if err != nil {
+		return nil, err
+	}
+
+	students := make([]dto.AssessmentStudentDetail, 0)
+	for _, as := range assessmentStudents {
+		// TODO: Ambil nama siswa dari tbl_siswa
+		students = append(students, dto.AssessmentStudentDetail{
+			AssessmentStudentID: as.AssessmentStudentID,
+			StudentID:           as.StudentID,
+			EnrolledAt:          as.EnrolledAt,
+		})
+	}
+
+	return &dto.AssessmentDetailResponse{
+		AssessmentResponse: dto.AssessmentResponse{
+			AssessmentID:     assessment.AssessmentID,
+			Title:            assessment.Title,
+			Description:      assessment.Description,
+			Type:             assessment.Type,
+			DurationMinutes:  assessment.DurationMinutes,
+			IsRandomQuestion: assessment.IsRandomQuestion,
+			IsRandomOption:   assessment.IsRandomOption,
+			PassingScore:     assessment.PassingScore,
+			ActiveFrom:       assessment.ActiveFrom,
+			ActiveUntil:      assessment.ActiveUntil,
+			Instruction:      assessment.Instruction,
+			CreatedBy:        assessment.CreatedBy,
+			CreatedAt:        assessment.CreatedAt,
+			TotalQuestions:   len(questions),
+			TotalStudents:    len(students),
+		},
+		Questions: questions,
+		Students:  students,
+	}, nil
+}
+
+func (s *cbtService) GetAssessments(assessmentType string, page, limit int) ([]dto.AssessmentResponse, int64, error) {
+	assessments, total, err := s.repo.GetAssessmentsByType(assessmentType, page, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]dto.AssessmentResponse, len(assessments))
+	for i, a := range assessments {
+		// Hitung jumlah soal
+		questions, _ := s.repo.GetAssessmentQuestions(a.AssessmentID)
+		students, _ := s.repo.GetAssessmentStudents(a.AssessmentID)
+
+		result[i] = dto.AssessmentResponse{
+			AssessmentID:         a.AssessmentID,
+			Title:                a.Title,
+			Description:          a.Description,
+			Type:                 a.Type,
+			DurationMinutes:      a.DurationMinutes,
+			IsRandomQuestion:     a.IsRandomQuestion,
+			IsRandomOption:       a.IsRandomOption,
+			TotalQuestionDisplay: a.TotalQuestionDisplay,
+			PassingScore:         a.PassingScore,
+			ActiveFrom:           a.ActiveFrom,
+			ActiveUntil:          a.ActiveUntil,
+			Instruction:          a.Instruction,
+			CreatedBy:            a.CreatedBy,
+			CreatedAt:            a.CreatedAt,
+			TotalQuestions:       len(questions),
+			TotalStudents:        len(students),
+		}
+	}
+
+	return result, total, nil
+}
+
+// ============================================
+// BANK & QUESTION SERVICE
+// ============================================
+
+func (s *cbtService) CreateBank(req *dto.CreateBankRequest, teacherID int) (*dto.BankResponse, error) {
+	bank := &model.ToQuestionBank{
+		BankName:   req.BankName,
+		Subject:    req.Subject,
+		SubjectCat: req.SubjectCat,
+		CreatedBy:  teacherID,
+	}
+
+	err := s.repo.CreateBank(bank)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.BankResponse{
+		BankID:    bank.BankID,
+		BankName:  bank.BankName,
+		Subject:   bank.Subject,
+		CreatedAt: bank.CreatedAt,
+	}, nil
+}
+
+func (s *cbtService) CreateQuestion(req *dto.CreateQuestionRequest, teacherID int) (*dto.QuestionResponse, error) {
+	// Buat soal utama
+	question := &model.ToQuestion{
+		BankID:          req.BankID,
+		QuestionType:    req.QuestionType,
+		QuestionText:    req.QuestionText,
+		Explanation:     req.Explanation,
+		DifficultyLevel: req.DifficultyLevel,
+		CreatedBy:       teacherID,
+	}
+
+	err := s.repo.CreateQuestion(question)
+	if err != nil {
+		return nil, err
+	}
+
+	// Buat opsi berdasarkan tipe soal
+	switch req.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		options := make([]model.ToQuestionOption, len(req.Options))
+		for i, opt := range req.Options {
+			options[i] = model.ToQuestionOption{
+				QuestionID:  question.QuestionID,
+				OptionLabel: opt.Label,
+				OptionText:  opt.Text,
+				IsCorrect:   opt.IsCorrect,
+				SortOrder:   opt.SortOrder,
+			}
+		}
+		err = s.repo.CreateOptions(options)
+
+	case "SHORT_ANSWER":
+		answers := make([]model.ToQuestionShortAnswer, len(req.ValidAnswers))
+		for i, ans := range req.ValidAnswers {
+			answers[i] = model.ToQuestionShortAnswer{
+				QuestionID:    question.QuestionID,
+				ValidAnswer:   ans,
+				CaseSensitive: req.CaseSensitive,
+			}
+		}
+		err = s.repo.CreateShortAnswers(answers)
+
+	case "MATCHING":
+		pairs := make([]model.ToQuestionMatching, len(req.MatchingPairs))
+		for i, pair := range req.MatchingPairs {
+			pairs[i] = model.ToQuestionMatching{
+				QuestionID: question.QuestionID,
+				LeftText:   pair.LeftText,
+				RightText:  pair.RightText,
+				PairOrder:  pair.PairOrder,
+			}
+		}
+		err = s.repo.CreateMatchingPairs(pairs)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.QuestionResponse{
+		QuestionID:      question.QuestionID,
+		BankID:          question.BankID,
+		QuestionType:    question.QuestionType,
+		QuestionText:    question.QuestionText,
+		Explanation:     question.Explanation,
+		DifficultyLevel: question.DifficultyLevel,
+		CreatedAt:       question.CreatedAt,
+	}, nil
+}
+
+// ============================================
+// ENROLLMENT SERVICE
+// ============================================
+
+func (s *cbtService) EnrollStudents(assessmentID uint, studentIDs []int) error {
+	assessmentStudents := make([]model.ToAssessmentStudent, len(studentIDs))
+	for i, studentID := range studentIDs {
+		assessmentStudents[i] = model.ToAssessmentStudent{
+			AssessmentID: assessmentID,
+			StudentID:    studentID,
+		}
+	}
+
+	return s.repo.AddStudentsToAssessment(assessmentStudents)
+}
+
+// ============================================
+// ATTEMPT SERVICE
+// ============================================
+
+func (s *cbtService) StartAttempt(studentID int, req *dto.StartAttemptRequest) (*dto.StartAttemptResponse, error) {
+	// Cek apakah sudah ada attempt aktif
+	existingAttempt, _ := s.repo.GetActiveAttempt(req.AssessmentID, studentID)
+	if existingAttempt != nil {
+		return nil, errors.New("anda sudah memiliki ujian yang sedang berjalan, silahkan resume")
+	}
+
+	// Ambil assessment
+	assessment, err := s.repo.GetAssessmentByID(req.AssessmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cek apakah assessment masih aktif
+	now := time.Now()
+	if now.Before(assessment.ActiveFrom) || now.After(assessment.ActiveUntil) {
+		return nil, errors.New("ujian tidak tersedia pada waktu ini")
+	}
+
+	// Cek apakah siswa terdaftar
+	assessmentStudents, err := s.repo.GetAssessmentStudents(req.AssessmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	isEnrolled := false
+	var assessmentStudentID uint
+	for _, as := range assessmentStudents {
+		if as.StudentID == studentID {
+			isEnrolled = true
+			assessmentStudentID = as.AssessmentStudentID
+			break
+		}
+	}
+
+	if !isEnrolled {
+		return nil, errors.New("anda tidak terdaftar dalam ujian ini")
+	}
+
+	// Buat attempt baru
+	attempt := &model.ToAttempt{
+		AssessmentID:        req.AssessmentID,
+		AssessmentStudentID: assessmentStudentID,
+		StudentID:           studentID,
+		Status:              "IN_PROGRESS",
+		DeviceInfo:          &req.DeviceInfo,
+		IPAddress:           &req.IPAddress,
+	}
+
+	err = s.repo.CreateAttempt(attempt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ambil soal-soal assessment
+	assessmentQuestions, err := s.repo.GetAssessmentQuestions(req.AssessmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ambil detail soal
+	questionIDs := make([]uint, len(assessmentQuestions))
+	for i, aq := range assessmentQuestions {
+		questionIDs[i] = aq.QuestionID
+	}
+
+	questions, err := s.repo.GetQuestionsByIDs(questionIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map question by ID
+	questionMap := make(map[uint]model.ToQuestion)
+	for _, q := range questions {
+		questionMap[q.QuestionID] = q
+	}
+
+	// Siapkan attempt questions
+	attemptQuestions := make([]model.ToAttemptQuestion, 0)
+	displayOrder := 1
+
+	// Tentukan urutan soal (random atau tidak)
+	type tempQuestion struct {
+		AssessmentQuestion model.ToAssessmentQuestion
+		Question           model.ToQuestion
+	}
+
+	tempList := make([]tempQuestion, len(assessmentQuestions))
+	for i, aq := range assessmentQuestions {
+		q := questionMap[aq.QuestionID]
+		tempList[i] = tempQuestion{
+			AssessmentQuestion: aq,
+			Question:           q,
+		}
+	}
+
+	// Random urutan jika diperlukan
+	if assessment.IsRandomQuestion {
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(tempList), func(i, j int) {
+			tempList[i], tempList[j] = tempList[j], tempList[i]
+		})
+	}
+
+	// Batasi jumlah soal jika ada total_question_displayed
+	if assessment.TotalQuestionDisplay != nil && *assessment.TotalQuestionDisplay > 0 && *assessment.TotalQuestionDisplay < len(tempList) {
+		tempList = tempList[:*assessment.TotalQuestionDisplay]
+	}
+
+	for _, tq := range tempList {
+		// Ambil opsi (untuk snapshot)
+		var optionsSnapshot *string
+		if tq.Question.QuestionType == "MCQ" || tq.Question.QuestionType == "MULTI_MCQ" || tq.Question.QuestionType == "TRUE_FALSE" {
+			options, err := s.repo.GetOptionsByQuestionID(tq.Question.QuestionID)
+			if err == nil {
+				// Random opsi jika diperlukan
+				if assessment.IsRandomOption {
+					rand.Shuffle(len(options), func(i, j int) {
+						options[i], options[j] = options[j], options[i]
+					})
+				}
+
+				// Buat JSON snapshot
+				type optionSnapshot struct {
+					OptionID  uint   `json:"option_id"`
+					Label     string `json:"label"`
+					Text      string `json:"text"`
+					IsCorrect bool   `json:"is_correct"`
+				}
+
+				snapshotList := make([]optionSnapshot, len(options))
+				for i, opt := range options {
+					snapshotList[i] = optionSnapshot{
+						OptionID:  opt.OptionID,
+						Label:     opt.OptionLabel,
+						Text:      opt.OptionText,
+						IsCorrect: opt.IsCorrect,
+					}
+				}
+
+				jsonBytes, _ := json.Marshal(snapshotList)
+				jsonStr := string(jsonBytes)
+				optionsSnapshot = &jsonStr
+			}
+		}
+
+		attemptQuestion := model.ToAttemptQuestion{
+			AttemptID:                    attempt.AttemptID,
+			OriginalQuestionID:           tq.Question.QuestionID,
+			OriginalAssessmentQuestionID: tq.AssessmentQuestion.AssessmentQuestionID,
+			QuestionSnapshot:             tq.Question.QuestionText,
+			QuestionTypeSnapshot:         tq.Question.QuestionType,
+			WeightSnapshot:               tq.AssessmentQuestion.Weight,
+			OptionsSnapshot:              optionsSnapshot,
+			DisplayOrder:                 displayOrder,
+			ReviewStatus:                 "PENDING",
+		}
+
+		attemptQuestions = append(attemptQuestions, attemptQuestion)
+		displayOrder++
+	}
+
+	err = s.repo.CreateAttemptQuestions(attemptQuestions)
+	if err != nil {
+		return nil, err
+	}
+
+	// Buat response
+	questionSnapshots := make([]dto.QuestionSnapshot, len(attemptQuestions))
+	for i, aq := range attemptQuestions {
+		var options []dto.OptionSnapshot
+		if aq.OptionsSnapshot != nil {
+			json.Unmarshal([]byte(*aq.OptionsSnapshot), &options)
+		}
+
+		questionSnapshots[i] = dto.QuestionSnapshot{
+			AttemptQuestionID: aq.AttemptQuestionID,
+			DisplayOrder:      aq.DisplayOrder,
+			QuestionText:      aq.QuestionSnapshot,
+			QuestionType:      aq.QuestionTypeSnapshot,
+			Weight:            aq.WeightSnapshot,
+			Options:           options,
+		}
+	}
+
+	return &dto.StartAttemptResponse{
+		AttemptID:       attempt.AttemptID,
+		AssessmentID:    assessment.AssessmentID,
+		AssessmentType:  assessment.Type,
+		Title:           assessment.Title,
+		DurationMinutes: assessment.DurationMinutes,
+		StartedAt:       attempt.StartedAt,
+		Questions:       questionSnapshots,
+	}, nil
+}
+
+func (s *cbtService) ResumeAttempt(attemptID uint) (*dto.ResumeAttemptResponse, error) {
+	attempt, err := s.repo.GetAttemptByID(attemptID)
+	if err != nil {
+		return nil, err
+	}
+
+	if attempt.Status != "IN_PROGRESS" && attempt.Status != "PAUSED" {
+		return nil, errors.New("attempt sudah selesai atau expired")
+	}
+
+	assessment, err := s.repo.GetAssessmentByID(attempt.AssessmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	attemptQuestions, err := s.repo.GetAttemptQuestions(attemptID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hitung sisa waktu
+	var remainingMinutes *int
+	if assessment.DurationMinutes != nil {
+		elapsed := int(time.Since(attempt.StartedAt).Minutes())
+		remaining := *assessment.DurationMinutes - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		remainingMinutes = &remaining
+	}
+
+	questionSnapshots := make([]dto.QuestionSnapshot, len(attemptQuestions))
+	for i, aq := range attemptQuestions {
+		var options []dto.OptionSnapshot
+		if aq.OptionsSnapshot != nil {
+			json.Unmarshal([]byte(*aq.OptionsSnapshot), &options)
+		}
+
+		// Ambil saved answer
+		var savedAnswer interface{}
+		switch aq.QuestionTypeSnapshot {
+		case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+			if aq.SelectedOptionIDs != nil {
+				var ids []uint
+				json.Unmarshal([]byte(*aq.SelectedOptionIDs), &ids)
+				savedAnswer = ids
+			}
+		case "SHORT_ANSWER":
+			savedAnswer = aq.AnswerText
+		case "MATCHING":
+			if aq.MatchingAnswerJSON != nil {
+				var matching map[string]string
+				json.Unmarshal([]byte(*aq.MatchingAnswerJSON), &matching)
+				savedAnswer = matching
+			}
+		case "ESSAY":
+			savedAnswer = aq.EssayAnswer
+		}
+
+		questionSnapshots[i] = dto.QuestionSnapshot{
+			AttemptQuestionID: aq.AttemptQuestionID,
+			DisplayOrder:      aq.DisplayOrder,
+			QuestionText:      aq.QuestionSnapshot,
+			QuestionType:      aq.QuestionTypeSnapshot,
+			Weight:            aq.WeightSnapshot,
+			Options:           options,
+			SavedAnswer:       savedAnswer,
+		}
+	}
+
+	return &dto.ResumeAttemptResponse{
+		AttemptID:        attempt.AttemptID,
+		AssessmentID:     assessment.AssessmentID,
+		Title:            assessment.Title,
+		RemainingMinutes: remainingMinutes,
+		Questions:        questionSnapshots,
+	}, nil
+}
+
+// ============================================
+// ANSWER SERVICE
+// ============================================
+
+func (s *cbtService) SubmitAnswer(req *dto.SubmitAnswerRequest) error {
+	attemptQuestion, err := s.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		return err
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		return errors.New("attempt tidak cocok")
+	}
+
+	// Update jawaban berdasarkan tipe soal
+	switch attemptQuestion.QuestionTypeSnapshot {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		idsJSON, _ := json.Marshal(req.SelectedOptionIDs)
+		idsStr := string(idsJSON)
+		attemptQuestion.SelectedOptionIDs = &idsStr
+
+		// Hitung auto score untuk MCQ
+		autoScore := s.calculateMCQScore(attemptQuestion.OriginalQuestionID, req.SelectedOptionIDs, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "SHORT_ANSWER":
+		attemptQuestion.AnswerText = req.AnswerText
+
+		// Hitung auto score untuk short answer
+		autoScore := s.calculateShortAnswerScore(attemptQuestion.OriginalQuestionID, *req.AnswerText, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "MATCHING":
+		matchingJSON, _ := json.Marshal(req.MatchingAnswer)
+		matchingStr := string(matchingJSON)
+		attemptQuestion.MatchingAnswerJSON = &matchingStr
+
+		// Hitung auto score untuk matching
+		autoScore := s.calculateMatchingScore(attemptQuestion.OriginalQuestionID, req.MatchingAnswer, float64(attemptQuestion.WeightSnapshot))
+		attemptQuestion.AutoScore = &autoScore
+
+	case "ESSAY":
+		if req.IsFinalSubmit {
+			attemptQuestion.EssayAnswer = req.EssayAnswer
+			attemptQuestion.EssayLastSavedAt = timeNowPtr()
+		}
+	}
+
+	err = s.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		return err
+	}
+
+	// Update last activity
+	attempt, _ := s.repo.GetAttemptByID(req.AttemptID)
+	if attempt != nil {
+		attempt.LastActivityAt = time.Now()
+		s.repo.UpdateAttempt(attempt)
+	}
+
+	return nil
+}
+
+func (s *cbtService) SubmitEssayDraft(req *dto.SubmitEssayDraftRequest) error {
+	attemptQuestion, err := s.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		return err
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		return errors.New("attempt tidak cocok")
+	}
+
+	if attemptQuestion.QuestionTypeSnapshot != "ESSAY" {
+		return errors.New("hanya essay yang memiliki draft")
+	}
+
+	// Simpan draft, BUKAN jawaban final
+	// Untuk draft, kita simpan di field terpisah atau update essay_answer dengan flag
+	// Karena di model tidak ada field draft terpisah, kita update essay_answer tapi dengan catatan
+	attemptQuestion.EssayAnswer = &req.EssayDraft
+	attemptQuestion.EssayLastSavedAt = timeNowPtr()
+
+	err = s.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		return err
+	}
+
+	// Log autosave
+	log := &model.ToAutosaveLog{
+		AttemptID:         req.AttemptID,
+		AttemptQuestionID: &req.AttemptQuestionID,
+		Action:            "AUTO_SAVE_DRAFT",
+	}
+	s.repo.CreateAutosaveLog(log)
+
+	return nil
+}
+
+func (s *cbtService) SubmitAssessment(attemptID uint) error {
+	attempt, err := s.repo.GetAttemptByID(attemptID)
+	if err != nil {
+		return err
+	}
+
+	if attempt.Status != "IN_PROGRESS" && attempt.Status != "PAUSED" {
+		return errors.New("attempt sudah disubmit sebelumnya")
+	}
+
+	attemptQuestions, err := s.repo.GetAttemptQuestions(attemptID)
+	if err != nil {
+		return err
+	}
+
+	// Hitung ulang semua nilai otomatis
+	var totalScore float64
+	var totalWeight int
+
+	for _, aq := range attemptQuestions {
+		totalWeight += aq.WeightSnapshot
+
+		if aq.AutoScore != nil {
+			totalScore += *aq.AutoScore
+		}
+	}
+
+	finalScore := (totalScore / float64(totalWeight)) * 100
+
+	// Tentukan status akhir
+	status := "COMPLETED"
+	hasEssay := false
+
+	for _, aq := range attemptQuestions {
+		if aq.QuestionTypeSnapshot == "ESSAY" && aq.TeacherScore == nil {
+			hasEssay = true
+			break
+		}
+	}
+
+	if hasEssay {
+		status = "WAITING_REVIEW"
+	}
+
+	submittedAt := time.Now()
+	isPassed := finalScore >= attempt.PassingScore
+
+	attempt.Status = status
+	attempt.SubmittedAt = &submittedAt
+	attempt.FinalScore = &finalScore
+	attempt.IsPassed = &isPassed
+
+	err = s.repo.UpdateAttempt(attempt)
+	if err != nil {
+		return err
+	}
+
+	// Log submit
+	log := &model.ToAutosaveLog{
+		AttemptID: attemptID,
+		Action:    "SUBMIT",
+	}
+	s.repo.CreateAutosaveLog(log)
+
+	return nil
+}
+
+// ============================================
+// REVIEW SERVICE
+// ============================================
+
+func (s *cbtService) ReviewEssay(req *dto.ReviewEssayRequest, teacherID int) error {
+	attemptQuestion, err := s.repo.GetAttemptQuestionByID(req.AttemptQuestionID)
+	if err != nil {
+		return err
+	}
+
+	if attemptQuestion.AttemptID != req.AttemptID {
+		return errors.New("attempt tidak cocok")
+	}
+
+	if attemptQuestion.QuestionTypeSnapshot != "ESSAY" {
+		return errors.New("hanya essay yang bisa direview")
+	}
+
+	attemptQuestion.TeacherScore = &req.TeacherScore
+	attemptQuestion.TeacherNote = &req.TeacherNote
+	attemptQuestion.ReviewStatus = "APPROVED"
+	attemptQuestion.ReviewedAt = timeNowPtr()
+	attemptQuestion.ReviewedBy = &teacherID
+
+	err = s.repo.UpdateAttemptQuestion(attemptQuestion)
+	if err != nil {
+		return err
+	}
+
+	// Hitung ulang final score
+	attempt, err := s.repo.GetAttemptByID(req.AttemptID)
+	if err != nil {
+		return err
+	}
+
+	attemptQuestions, err := s.repo.GetAttemptQuestions(req.AttemptID)
+	if err != nil {
+		return err
+	}
+
+	var totalScore float64
+	var totalWeight int
+
+	for _, aq := range attemptQuestions {
+		totalWeight += aq.WeightSnapshot
+
+		if aq.AutoScore != nil {
+			totalScore += *aq.AutoScore
+		}
+		if aq.TeacherScore != nil {
+			totalScore += *aq.TeacherScore
+		}
+	}
+
+	finalScore := (totalScore / float64(totalWeight)) * 100
+	isPassed := finalScore >= attempt.PassingScore
+
+	// Cek apakah masih ada essay yang belum direview
+	hasPendingEssay := false
+	for _, aq := range attemptQuestions {
+		if aq.QuestionTypeSnapshot == "ESSAY" && aq.ReviewStatus == "PENDING" {
+			hasPendingEssay = true
+			break
+		}
+	}
+
+	if !hasPendingEssay {
+		attempt.Status = "COMPLETED"
+	}
+
+	attempt.FinalScore = &finalScore
+	attempt.IsPassed = &isPassed
+
+	return s.repo.UpdateAttempt(attempt)
+}
+
+func (s *cbtService) OverrideScore(req *dto.OverrideScoreRequest, teacherID int) error {
+	attempt, err := s.repo.GetAttemptByID(req.AttemptID)
+	if err != nil {
+		return err
+	}
+
+	oldScore := attempt.FinalScore
+
+	attempt.IsOverride = true
+	attempt.OverrideScore = &req.NewScore
+	attempt.OverrideReason = &req.Reason
+	attempt.OverriddenBy = &teacherID
+	attempt.OverriddenAt = timeNowPtr()
+	attempt.FinalScore = &req.NewScore
+	attempt.IsPassed = &[]bool{req.NewScore >= attempt.PassingScore}[0]
+
+	return s.repo.UpdateAttempt(attempt)
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+func (s *cbtService) calculateMCQScore(questionID uint, selectedOptionIDs []uint, weight float64) float64 {
+	options, err := s.repo.GetOptionsByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	// Cari opsi yang benar
+	var correctOptionID *uint
+	for _, opt := range options {
+		if opt.IsCorrect {
+			correctOptionID = &opt.OptionID
+			break
+		}
+	}
+
+	if correctOptionID == nil {
+		return 0
+	}
+
+	// Cek apakah jawaban benar
+	for _, selectedID := range selectedOptionIDs {
+		if selectedID == *correctOptionID {
+			return weight
+		}
+	}
+
+	return 0
+}
+
+func (s *cbtService) calculateShortAnswerScore(questionID uint, answer string, weight float64) float64 {
+	validAnswers, err := s.repo.GetShortAnswersByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	for _, va := range validAnswers {
+		if va.CaseSensitive {
+			if answer == va.ValidAnswer {
+				return weight
+			}
+		} else {
+			if strings.EqualFold(answer, va.ValidAnswer) {
+				return weight
+			}
+		}
+	}
+
+	return 0
+}
+
+func (s *cbtService) calculateMatchingScore(questionID uint, studentAnswers map[string]string, weight float64) float64 {
+	matchingPairs, err := s.repo.GetMatchingPairsByQuestionID(questionID)
+	if err != nil {
+		return 0
+	}
+
+	correctCount := 0
+	for _, pair := range matchingPairs {
+		// Cek apakah jawaban siswa sesuai
+		studentRight, exists := studentAnswers[fmt.Sprintf("%d", pair.MatchingID)]
+		if exists && studentRight == pair.RightText {
+			correctCount++
+		}
+	}
+
+	// Prorata: (jawaban benar / total pasangan) * bobot
+	if len(matchingPairs) > 0 {
+		return (float64(correctCount) / float64(len(matchingPairs))) * weight
+	}
+
+	return 0
+}
+
+func timeNowPtr() *time.Time {
+	t := time.Now()
+	return &t
+}

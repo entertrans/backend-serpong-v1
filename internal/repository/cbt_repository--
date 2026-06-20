@@ -1,0 +1,357 @@
+package repository
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+type CBTRepository interface {
+	// Assessment
+	CreateAssessment(assessment *model.ToAssessment) error
+	GetAssessmentByID(id uint) (*model.ToAssessment, error)
+	GetAssessmentsByType(assessmentType string, page, limit int) ([]model.ToAssessment, int64, error)
+	UpdateAssessment(assessment *model.ToAssessment) error
+	DeleteAssessment(id uint) error
+
+	// Assessment Question
+	AddQuestionToAssessment(assessmentQuestion *model.ToAssessmentQuestion) error
+	GetAssessmentQuestions(assessmentID uint) ([]model.ToAssessmentQuestion, error)
+	RemoveQuestionFromAssessment(assessmentID, questionID uint) error
+
+	// Assessment Student
+	AddStudentToAssessment(assessmentStudent *model.ToAssessmentStudent) error
+	AddStudentsToAssessment(assessmentStudents []model.ToAssessmentStudent) error
+	GetAssessmentStudents(assessmentID uint) ([]model.ToAssessmentStudent, error)
+	GetAssessmentStudentByID(assessmentID uint, studentID int) (*model.ToAssessmentStudent, error)
+	RemoveStudentFromAssessment(assessmentID, studentID uint) error
+
+	// Bank Soal
+	CreateBank(bank *model.ToQuestionBank) error
+	GetBankByID(id uint) (*model.ToQuestionBank, error)
+	GetAllBanks() ([]model.ToQuestionBank, error)
+
+	// Question
+	CreateQuestion(question *model.ToQuestion) error
+	GetQuestionByID(id uint) (*model.ToQuestion, error)
+	GetQuestionsByBank(bankID uint) ([]model.ToQuestion, error)
+	GetQuestionsByIDs(ids []uint) ([]model.ToQuestion, error)
+	UpdateQuestion(question *model.ToQuestion) error
+	DeleteQuestion(id uint) error
+
+	// Question Option
+	CreateOptions(options []model.ToQuestionOption) error
+	GetOptionsByQuestionID(questionID uint) ([]model.ToQuestionOption, error)
+
+	// Short Answer
+	CreateShortAnswers(answers []model.ToQuestionShortAnswer) error
+	GetShortAnswersByQuestionID(questionID uint) ([]model.ToQuestionShortAnswer, error)
+
+	// Matching
+	CreateMatchingPairs(pairs []model.ToQuestionMatching) error
+	GetMatchingPairsByQuestionID(questionID uint) ([]model.ToQuestionMatching, error)
+
+	// Attempt
+	CreateAttempt(attempt *model.ToAttempt) error
+	GetAttemptByID(id uint) (*model.ToAttempt, error)
+	GetActiveAttempt(assessmentID uint, studentID int) (*model.ToAttempt, error)
+	GetAttemptsByStudent(studentID int, page, limit int) ([]model.ToAttempt, int64, error)
+	UpdateAttempt(attempt *model.ToAttempt) error
+
+	// Attempt Question
+	CreateAttemptQuestions(questions []model.ToAttemptQuestion) error
+	GetAttemptQuestions(attemptID uint) ([]model.ToAttemptQuestion, error)
+	GetAttemptQuestionByID(id uint) (*model.ToAttemptQuestion, error)
+	UpdateAttemptQuestion(question *model.ToAttemptQuestion) error
+
+	// Autosave Log
+	CreateAutosaveLog(log *model.ToAutosaveLog) error
+}
+
+type cbtRepository struct {
+	db *gorm.DB
+}
+
+func NewCBTRepository(db *gorm.DB) CBTRepository {
+	return &cbtRepository{db: db}
+}
+
+// ============================================
+// ASSESSMENT IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateAssessment(assessment *model.ToAssessment) error {
+	return r.db.Create(assessment).Error
+}
+
+func (r *cbtRepository) GetAssessmentByID(id uint) (*model.ToAssessment, error) {
+	var assessment model.ToAssessment
+	err := r.db.Where("assessment_id = ? AND deleted_at IS NULL", id).First(&assessment).Error
+	if err != nil {
+		return nil, err
+	}
+	return &assessment, nil
+}
+
+func (r *cbtRepository) GetAssessmentsByType(assessmentType string, page, limit int) ([]model.ToAssessment, int64, error) {
+	var assessments []model.ToAssessment
+	var total int64
+
+	query := r.db.Model(&model.ToAssessment{}).Where("deleted_at IS NULL")
+	if assessmentType != "" {
+		query = query.Where("type = ?", assessmentType)
+	}
+
+	err := query.Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	err = query.Order("created_at DESC").Offset(offset).Limit(limit).Find(&assessments).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return assessments, total, nil
+}
+
+func (r *cbtRepository) UpdateAssessment(assessment *model.ToAssessment) error {
+	return r.db.Save(assessment).Error
+}
+
+func (r *cbtRepository) DeleteAssessment(id uint) error {
+	return r.db.Model(&model.ToAssessment{}).Where("assessment_id = ?", id).Update("deleted_at", time.Now()).Error
+}
+
+// ============================================
+// ASSESSMENT QUESTION IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) AddQuestionToAssessment(assessmentQuestion *model.ToAssessmentQuestion) error {
+	return r.db.Create(assessmentQuestion).Error
+}
+
+func (r *cbtRepository) GetAssessmentQuestions(assessmentID uint) ([]model.ToAssessmentQuestion, error) {
+	var questions []model.ToAssessmentQuestion
+	err := r.db.Where("assessment_id = ?", assessmentID).Find(&questions).Error
+	return questions, err
+}
+
+func (r *cbtRepository) RemoveQuestionFromAssessment(assessmentID, questionID uint) error {
+	return r.db.Where("assessment_id = ? AND question_id = ?", assessmentID, questionID).Delete(&model.ToAssessmentQuestion{}).Error
+}
+
+// ============================================
+// ASSESSMENT STUDENT IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) AddStudentToAssessment(assessmentStudent *model.ToAssessmentStudent) error {
+	return r.db.Create(assessmentStudent).Error
+}
+
+func (r *cbtRepository) AddStudentsToAssessment(assessmentStudents []model.ToAssessmentStudent) error {
+	return r.db.CreateInBatches(assessmentStudents, 100).Error
+}
+
+func (r *cbtRepository) GetAssessmentStudents(assessmentID uint) ([]model.ToAssessmentStudent, error) {
+	var students []model.ToAssessmentStudent
+	err := r.db.Where("assessment_id = ?", assessmentID).Preload("Siswa").Find(&students).Error
+	return students, err
+}
+
+func (r *cbtRepository) GetAssessmentStudentByID(assessmentID uint, studentID int) (*model.ToAssessmentStudent, error) {
+	var student model.ToAssessmentStudent
+	err := r.db.Where("assessment_id = ? AND student_id = ?", assessmentID, studentID).First(&student).Error
+	if err != nil {
+		return nil, err
+	}
+	return &student, nil
+}
+
+func (r *cbtRepository) RemoveStudentFromAssessment(assessmentID, studentID uint) error {
+	return r.db.Where("assessment_id = ? AND student_id = ?", assessmentID, studentID).Delete(&model.ToAssessmentStudent{}).Error
+}
+
+// ============================================
+// BANK SOAL IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateBank(bank *model.ToQuestionBank) error {
+	return r.db.Create(bank).Error
+}
+
+func (r *cbtRepository) GetBankByID(id uint) (*model.ToQuestionBank, error) {
+	var bank model.ToQuestionBank
+	err := r.db.Where("bank_id = ? AND deleted_at IS NULL", id).First(&bank).Error
+	return &bank, err
+}
+
+func (r *cbtRepository) GetAllBanks() ([]model.ToQuestionBank, error) {
+	var banks []model.ToQuestionBank
+	err := r.db.Where("deleted_at IS NULL").Find(&banks).Error
+	return banks, err
+}
+
+// ============================================
+// QUESTION IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateQuestion(question *model.ToQuestion) error {
+	return r.db.Create(question).Error
+}
+
+func (r *cbtRepository) GetQuestionByID(id uint) (*model.ToQuestion, error) {
+	var question model.ToQuestion
+	err := r.db.Where("question_id = ? AND deleted_at IS NULL", id).First(&question).Error
+	return &question, err
+}
+
+func (r *cbtRepository) GetQuestionsByBank(bankID uint) ([]model.ToQuestion, error) {
+	var questions []model.ToQuestion
+	err := r.db.Where("bank_id = ? AND deleted_at IS NULL", bankID).Find(&questions).Error
+	return questions, err
+}
+
+func (r *cbtRepository) GetQuestionsByIDs(ids []uint) ([]model.ToQuestion, error) {
+	var questions []model.ToQuestion
+	err := r.db.Where("question_id IN ? AND deleted_at IS NULL", ids).Find(&questions).Error
+	return questions, err
+}
+
+func (r *cbtRepository) UpdateQuestion(question *model.ToQuestion) error {
+	return r.db.Save(question).Error
+}
+
+func (r *cbtRepository) DeleteQuestion(id uint) error {
+	return r.db.Model(&model.ToQuestion{}).Where("question_id = ?", id).Update("deleted_at", time.Now()).Error
+}
+
+// ============================================
+// OPTION IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateOptions(options []model.ToQuestionOption) error {
+	return r.db.CreateInBatches(options, 100).Error
+}
+
+func (r *cbtRepository) GetOptionsByQuestionID(questionID uint) ([]model.ToQuestionOption, error) {
+	var options []model.ToQuestionOption
+	err := r.db.Where("question_id = ?", questionID).Order("sort_order ASC").Find(&options).Error
+	return options, err
+}
+
+// ============================================
+// SHORT ANSWER IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateShortAnswers(answers []model.ToQuestionShortAnswer) error {
+	return r.db.CreateInBatches(answers, 100).Error
+}
+
+func (r *cbtRepository) GetShortAnswersByQuestionID(questionID uint) ([]model.ToQuestionShortAnswer, error) {
+	var answers []model.ToQuestionShortAnswer
+	err := r.db.Where("question_id = ?", questionID).Find(&answers).Error
+	return answers, err
+}
+
+// ============================================
+// MATCHING IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateMatchingPairs(pairs []model.ToQuestionMatching) error {
+	return r.db.CreateInBatches(pairs, 100).Error
+}
+
+func (r *cbtRepository) GetMatchingPairsByQuestionID(questionID uint) ([]model.ToQuestionMatching, error) {
+	var pairs []model.ToQuestionMatching
+	err := r.db.Where("question_id = ?", questionID).Order("pair_order ASC").Find(&pairs).Error
+	return pairs, err
+}
+
+// ============================================
+// ATTEMPT IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateAttempt(attempt *model.ToAttempt) error {
+	return r.db.Create(attempt).Error
+}
+
+func (r *cbtRepository) GetAttemptByID(id uint) (*model.ToAttempt, error) {
+	var attempt model.ToAttempt
+	err := r.db.Preload("Siswa").Preload("Assessment").Preload("Questions").Where("attempt_id = ?", id).First(&attempt).Error
+	if err != nil {
+		return nil, err
+	}
+	return &attempt, nil
+}
+
+func (r *cbtRepository) GetActiveAttempt(assessmentID uint, studentID int) (*model.ToAttempt, error) {
+	var attempt model.ToAttempt
+	err := r.db.Where("assessment_id = ? AND student_id = ? AND status IN ?",
+		assessmentID, studentID, []string{"IN_PROGRESS", "PAUSED"}).
+		Order("started_at DESC").
+		First(&attempt).Error
+	if err != nil {
+		return nil, err
+	}
+	return &attempt, nil
+}
+
+func (r *cbtRepository) GetAttemptsByStudent(studentID int, page, limit int) ([]model.ToAttempt, int64, error) {
+	var attempts []model.ToAttempt
+	var total int64
+
+	query := r.db.Model(&model.ToAttempt{}).Where("student_id = ?", studentID)
+
+	err := query.Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	err = query.Preload("Assessment").Order("started_at DESC").Offset(offset).Limit(limit).Find(&attempts).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return attempts, total, nil
+}
+
+func (r *cbtRepository) UpdateAttempt(attempt *model.ToAttempt) error {
+	return r.db.Save(attempt).Error
+}
+
+// ============================================
+// ATTEMPT QUESTION IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateAttemptQuestions(questions []model.ToAttemptQuestion) error {
+	return r.db.CreateInBatches(questions, 100).Error
+}
+
+func (r *cbtRepository) GetAttemptQuestions(attemptID uint) ([]model.ToAttemptQuestion, error) {
+	var questions []model.ToAttemptQuestion
+	err := r.db.Where("attempt_id = ?", attemptID).Order("display_order ASC").Find(&questions).Error
+	return questions, err
+}
+
+func (r *cbtRepository) GetAttemptQuestionByID(id uint) (*model.ToAttemptQuestion, error) {
+	var question model.ToAttemptQuestion
+	err := r.db.Where("attempt_question_id = ?", id).First(&question).Error
+	return &question, err
+}
+
+func (r *cbtRepository) UpdateAttemptQuestion(question *model.ToAttemptQuestion) error {
+	return r.db.Save(question).Error
+}
+
+// ============================================
+// AUTOSAVE LOG IMPLEMENTATION
+// ============================================
+
+func (r *cbtRepository) CreateAutosaveLog(log *model.ToAutosaveLog) error {
+	return r.db.Create(log).Error
+}

@@ -1,0 +1,360 @@
+// controller/cbt/bank_questioncrud.go
+package cbt
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"github.com/entertrans/backend-bogor.git/internal/dto"
+	"github.com/entertrans/backend-bogor.git/internal/model"
+)
+
+// ============================================
+// QUESTION CRUD
+// ============================================
+
+func (ctrl *cbtController) CreateQuestion(c *gin.Context) {
+	var req dto.CreateQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Extract userID dari context (middleware)
+	userIDValue, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found in context"})
+		return
+	}
+
+	// Convert userID ke int
+	var createdBy int
+	switch v := userIDValue.(type) {
+	case float64:
+		createdBy = int(v)
+	case int:
+		createdBy = v
+	case uint:
+		createdBy = int(v)
+	case int64:
+		createdBy = int(v)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user id type"})
+		return
+	}
+
+	// Gunakan transaction
+	tx := ctrl.db.Begin()
+
+	// 1. Create question
+	question := &model.ToQuestion{
+		BankID:       req.BankID,
+		QuestionType: req.QuestionType,
+		QuestionText: req.QuestionText,
+		Explanation:  req.Explanation,
+		CreatedBy:    createdBy,
+	}
+
+	if err := tx.Create(question).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 2. Create specific data based on question type
+	switch req.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		if err := createOptions(tx, question.QuestionID, req.Options); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	case "SHORT_ANSWER":
+		if err := createShortAnswers(tx, question.QuestionID, req.ValidAnswers); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	case "MATCHING":
+		if err := createMatchingPairs(tx, question.QuestionID, req.MatchingPairs); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	tx.Commit()
+
+	response := buildQuestionDetailResponse(ctrl.db, question)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Soal berhasil dibuat",
+		"data":    response,
+	})
+}
+
+func (ctrl *cbtController) GetQuestions(c *gin.Context) {
+	bankIDStr := c.Query("bank_id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	var questions []model.ToQuestion
+	var total int64
+
+	query := ctrl.db.Model(&model.ToQuestion{}).Where("deleted_at IS NULL")
+
+	if bankIDStr != "" {
+		bankID, err := strconv.ParseUint(bankIDStr, 10, 32)
+		if err == nil {
+			query = query.Where("bank_id = ?", uint(bankID))
+		}
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err := query.
+		Offset(offset).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&questions).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]dto.QuestionResponse, len(questions))
+	for i, q := range questions {
+		result[i] = dto.QuestionResponse{
+			QuestionID:   q.QuestionID,
+			BankID:       q.BankID,
+			QuestionType: q.QuestionType,
+			QuestionText: q.QuestionText,
+			Explanation:  q.Explanation,
+			CreatedBy:    q.CreatedBy,
+			CreatedAt:    q.CreatedAt,
+			UpdatedAt:    q.UpdatedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+func (ctrl *cbtController) GetQuestionsByBank(c *gin.Context) {
+	bankIDStr := c.Param("id")
+	bankID, err := strconv.ParseUint(bankIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bank id"})
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	var questions []model.ToQuestion
+	var total int64
+
+	query := ctrl.db.Model(&model.ToQuestion{}).
+		Where("bank_id = ? AND deleted_at IS NULL", uint(bankID))
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err = query.
+		Offset(offset).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&questions).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]dto.QuestionDetailResponse, len(questions))
+	for i, q := range questions {
+		result[i] = buildQuestionDetailResponse(ctrl.db, &q)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  result,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+func (ctrl *cbtController) GetQuestionByID(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	var question model.ToQuestion
+	err = ctrl.db.Where("question_id = ? AND deleted_at IS NULL", uint(id)).
+		First(&question).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "soal tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	response := buildQuestionDetailResponse(ctrl.db, &question)
+
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func (ctrl *cbtController) UpdateQuestion(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	var req dto.CreateQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var question model.ToQuestion
+	err = ctrl.db.Where("question_id = ? AND deleted_at IS NULL", uint(id)).
+		First(&question).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "soal tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Mulai transaction
+	tx := ctrl.db.Begin()
+
+	// Update question basic info
+	if req.QuestionText != "" {
+		question.QuestionText = req.QuestionText
+	}
+	if req.Explanation != nil {
+		question.Explanation = req.Explanation
+	}
+	if req.BankID != nil {
+		question.BankID = req.BankID
+	}
+
+	if err := tx.Save(&question).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Delete existing related data and create new ones
+	if err := updateQuestionRelatedData(tx, &question, &req); err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit transaction: " + err.Error()})
+		return
+	}
+
+	response := buildQuestionDetailResponse(ctrl.db, &question)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Soal berhasil diupdate",
+		"data":    response,
+	})
+}
+
+func (ctrl *cbtController) DeleteQuestion(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	result := ctrl.db.Model(&model.ToQuestion{}).
+		Where("question_id = ?", uint(id)).
+		Update("deleted_at", gorm.Expr("NOW()"))
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "soal tidak ditemukan"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Soal berhasil dihapus"})
+}
+
+// ============================================
+// INTERNAL HELPER FUNCTIONS FOR QUESTION
+// ============================================
+
+func updateQuestionRelatedData(tx *gorm.DB, question *model.ToQuestion, req *dto.CreateQuestionRequest) error {
+	switch question.QuestionType {
+	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionOption{}).Error; err != nil {
+			return err
+		}
+		if err := createOptions(tx, question.QuestionID, req.Options); err != nil {
+			return err
+		}
+
+	case "SHORT_ANSWER":
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionShortAnswer{}).Error; err != nil {
+			return err
+		}
+		if err := createShortAnswers(tx, question.QuestionID, req.ValidAnswers); err != nil {
+			return err
+		}
+
+	case "MATCHING":
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionMatching{}).Error; err != nil {
+			return err
+		}
+		if err := createMatchingPairs(tx, question.QuestionID, req.MatchingPairs); err != nil {
+			return err
+		}
+	}
+	return nil
+}

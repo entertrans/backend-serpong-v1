@@ -9,7 +9,7 @@ import (
 
 // UpdateSiswa untuk update data siswa berdasarkan NIS
 func (c *siswaController) UpdateSiswa(nis string, req dto.UpdateSiswaRequest) error {
-	fmt.Println("🚀 UPDATE SISWA:", nis)
+	// fmt.Println("🚀 UPDATE SISWA:", nis)
 
 	tx := c.db.Begin()
 
@@ -33,7 +33,7 @@ func (c *siswaController) UpdateSiswa(nis string, req dto.UpdateSiswaRequest) er
 
 // UpdateOrangtua untuk update data orangtua berdasarkan NIS siswa
 func (c *siswaController) UpdateOrangtua(nis string, req dto.UpdateOrangtuaRequest) error {
-	fmt.Println("🚀 UPDATE ORANGTUA untuk siswa:", nis)
+	// fmt.Println("🚀 UPDATE ORANGTUA untuk siswa:", nis)
 
 	tx := c.db.Begin()
 

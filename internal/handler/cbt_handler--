@@ -1,0 +1,45 @@
+package handler
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"github.com/entertrans/backend-bogor.git/internal/controller"
+)
+
+type CBTHandler interface {
+	CreateAssessment(c *gin.Context)
+	GetAssessmentByID(c *gin.Context)
+	GetAssessments(c *gin.Context)
+	CreateBank(c *gin.Context)
+	CreateQuestion(c *gin.Context)
+	EnrollStudents(c *gin.Context)
+	StartAttempt(c *gin.Context)
+	ResumeAttempt(c *gin.Context)
+	SubmitAnswer(c *gin.Context)
+	SubmitEssayDraft(c *gin.Context)
+	SubmitAssessment(c *gin.Context)
+	ReviewEssay(c *gin.Context)
+	OverrideScore(c *gin.Context)
+}
+
+type cbtHandler struct {
+	cbtController controller.CBTController
+}
+
+func NewCBTHandler(cbtController controller.CBTController) CBTHandler {
+	return &cbtHandler{cbtController: cbtController}
+}
+
+func (h *cbtHandler) CreateAssessment(c *gin.Context)  { h.cbtController.CreateAssessment(c) }
+func (h *cbtHandler) GetAssessmentByID(c *gin.Context) { h.cbtController.GetAssessmentByID(c) }
+func (h *cbtHandler) GetAssessments(c *gin.Context)    { h.cbtController.GetAssessments(c) }
+func (h *cbtHandler) CreateBank(c *gin.Context)        { h.cbtController.CreateBank(c) }
+func (h *cbtHandler) CreateQuestion(c *gin.Context)    { h.cbtController.CreateQuestion(c) }
+func (h *cbtHandler) EnrollStudents(c *gin.Context)    { h.cbtController.EnrollStudents(c) }
+func (h *cbtHandler) StartAttempt(c *gin.Context)      { h.cbtController.StartAttempt(c) }
+func (h *cbtHandler) ResumeAttempt(c *gin.Context)     { h.cbtController.ResumeAttempt(c) }
+func (h *cbtHandler) SubmitAnswer(c *gin.Context)      { h.cbtController.SubmitAnswer(c) }
+func (h *cbtHandler) SubmitEssayDraft(c *gin.Context)  { h.cbtController.SubmitEssayDraft(c) }
+func (h *cbtHandler) SubmitAssessment(c *gin.Context)  { h.cbtController.SubmitAssessment(c) }
+func (h *cbtHandler) ReviewEssay(c *gin.Context)       { h.cbtController.ReviewEssay(c) }
+func (h *cbtHandler) OverrideScore(c *gin.Context)     { h.cbtController.OverrideScore(c) }

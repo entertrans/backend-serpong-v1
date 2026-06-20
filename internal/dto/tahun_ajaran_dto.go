@@ -54,3 +54,23 @@ type ReactivateTahunAjaranResponse struct {
 	Status      string `json:"status"`
 	Message     string `json:"message"`
 }
+
+// internal/dto/rapor_dto.go
+// KelasWaliItem - item kelas wali
+type KelasWaliItem struct {
+	KelasID   uint   `json:"kelas_id"`
+	KelasNama string `json:"kelas_nama"`
+}
+
+// GetKelasWaliResponse - response untuk mengambil kelas wali
+type GetKelasWaliResponse struct {
+	TaID       uint            `json:"ta_id"`
+	TaNama     string          `json:"ta_nama"`
+	Semester   string          `json:"semester"`
+	Status     string          `json:"status"`
+	GuruID     uint            `json:"guru_id"`
+	GuruNama   string          `json:"guru_nama"`
+	GuruNIP    string          `json:"guru_nip"`
+	TotalKelas int             `json:"total_kelas"`
+	KelasList  []KelasWaliItem `json:"kelas_list"`
+}
