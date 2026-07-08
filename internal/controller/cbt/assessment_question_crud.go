@@ -205,10 +205,6 @@ func (ctrl *cbtController) UpdateQuestionWeight(c *gin.Context) {
 	// Ambil parameter
 	assessmentIDStr := c.Param("id")
 	questionIDStr := c.Param("question_id")
-	// Tambahkan log
-	// println("=== DEBUG UpdateQuestionWeight ===")
-	// println("assessmentIDStr:", assessmentIDStr)
-	// println("questionIDStr:", questionIDStr)
 
 	assessmentID, err := strconv.ParseUint(assessmentIDStr, 10, 32)
 	if err != nil {
@@ -221,9 +217,6 @@ func (ctrl *cbtController) UpdateQuestionWeight(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
 		return
 	}
-
-	// println("Parsed assessmentID:", assessmentID)
-	// println("Parsed questionID:", questionID)
 
 	// Parse request
 	var req dto.UpdateQuestionWeightRequest
@@ -245,7 +238,6 @@ func (ctrl *cbtController) UpdateQuestionWeight(c *gin.Context) {
 		}
 		return
 	}
-	// println("Record found! AssessmentQuestionID:", assessmentQuestion.AssessmentQuestionID)
 
 	// Update weight
 	assessmentQuestion.Weight = req.Weight
@@ -254,11 +246,31 @@ func (ctrl *cbtController) UpdateQuestionWeight(c *gin.Context) {
 		return
 	}
 
-	// Load ulang dengan relasi
-	ctrl.db.Preload("Question").First(&assessmentQuestion, assessmentQuestion.AssessmentQuestionID)
+	// Load ulang question secara manual (lebih aman)
+	var question model.ToQuestion
+	err = ctrl.db.Where("question_id = ? AND deleted_at IS NULL", assessmentQuestion.QuestionID).First(&question).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// Jika question tidak ditemukan, tetap return success tapi tanpa detail question
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Bobot soal berhasil diupdate",
+				"data": dto.AssessmentQuestionResponse{
+					AssessmentQuestionID: assessmentQuestion.AssessmentQuestionID,
+					AssessmentID:         assessmentQuestion.AssessmentID,
+					QuestionID:           assessmentQuestion.QuestionID,
+					Weight:               assessmentQuestion.Weight,
+					FixedOrder:           assessmentQuestion.FixedOrder,
+					Question:             dto.QuestionDetailResponse{}, // Empty response
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal load detail soal: " + err.Error()})
+		return
+	}
 
-	// Gunakan buildQuestionDetailResponse yang sudah ada
-	questionDetail := buildQuestionDetailResponse(ctrl.db, assessmentQuestion.Question)
+	// Gunakan buildQuestionDetailResponse dengan question yang valid
+	questionDetail := buildQuestionDetailResponse(ctrl.db, &question)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Bobot soal berhasil diupdate",

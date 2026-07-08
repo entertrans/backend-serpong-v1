@@ -317,20 +317,6 @@ func (ctrl *cbtController) UpdateUBDate(c *gin.Context) {
 }
 
 func (ctrl *cbtController) GetAssessments(c *gin.Context) {
-	// ✅ Ambil user info dari context (dari middleware)
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-		return
-	}
-
-	userRole, exists := c.Get("userRole")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
-		return
-	}
-
-	// Parse query parameters
 	search := c.Query("search")
 	assessmentType := c.Query("type")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -346,47 +332,20 @@ func (ctrl *cbtController) GetAssessments(c *gin.Context) {
 	var assessments []model.ToAssessment
 	var total int64
 
-	// ✅ Build query dengan filter berdasarkan role
 	query := ctrl.db.Model(&model.ToAssessment{}).
 		Where("deleted_at IS NULL").
 		Preload("Creator")
 
-	// ✅ LOGIC FILTER BERDASARKAN ROLE
-	role := userRole.(string)
-	userIDUint := uint(userID.(float64)) // JWT claims user_id biasanya float64
-
-	if role == "admin" {
-		// Admin: lihat SEMUA assessment
-		// Tidak perlu filter tambahan
-	} else if role == "guru" {
-		// Guru: lihat assessment yang dibuat oleh:
-		// 1. Guru itu sendiri (created_by = userID)
-		// 2. Admin (created_by = user dengan role 'admin')
-
-		// Subquery untuk mencari user dengan role admin
-		query = query.Where(
-			"created_by = ? OR created_by IN (SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL)",
-			userIDUint,
-		)
-	} else {
-		// Role lain (student, dll): hanya lihat milik sendiri
-		query = query.Where("created_by = ?", userIDUint)
-	}
-
-	// Filter search
 	if search != "" {
 		query = query.Where("title LIKE ?", "%"+search+"%")
 	}
 
-	// Filter type
 	if assessmentType != "" {
 		query = query.Where("type = ?", assessmentType)
 	}
 
-	// Count total
 	query.Count(&total)
 
-	// Get paginated data
 	offset := (page - 1) * limit
 	err := query.
 		Offset(offset).
@@ -399,7 +358,6 @@ func (ctrl *cbtController) GetAssessments(c *gin.Context) {
 		return
 	}
 
-	// Build response
 	result := make([]dto.AssessmentResponse, len(assessments))
 	for i, assessment := range assessments {
 		result[i] = buildAssessmentResponse(ctrl.db, &assessment)

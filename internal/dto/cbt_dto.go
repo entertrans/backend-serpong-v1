@@ -51,13 +51,15 @@ type BankDetailResponse struct {
 
 // dto/bank.go
 type BankByKelasResponse struct {
-	BankID         uint      `json:"bank_id"`
-	BankName       string    `json:"bank_name"`
-	KdMapel        uint64    `json:"kd_mapel"`
-	MapelName      string    `json:"mapel_name"`
-	Description    *string   `json:"description,omitempty"`
-	TotalQuestions int64     `json:"total_questions"`
-	CreatedAt      time.Time `json:"created_at"`
+	BankID         uint    `json:"bank_id"`
+	BankName       string  `json:"bank_name"`
+	KdMapel        uint64  `json:"kd_mapel"`
+	MapelName      string  `json:"mapel_name"`
+	Description    *string `json:"description,omitempty"`
+	TotalQuestions int64   `json:"total_questions"`
+	// CreatedBy      int       `json:"created_by"`      // ✅ Tambahkan ini
+	// CreatedByName  string    `json:"created_by_name"` // ✅ Tambahkan ini
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // ========== QUESTION DTO ==========

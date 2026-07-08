@@ -85,8 +85,26 @@ func (ctrl *cbtController) CreateBank(c *gin.Context) {
 	})
 }
 
+// controller/cbt/cbt_controller.go
+
 func (ctrl *cbtController) GetBanks(c *gin.Context) {
+	// ✅ Ambil user info dari context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	userRole, exists := c.Get("userRole")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
+	// Parse query parameters
 	search := c.Query("search")
+	mapelID := c.Query("mapel_id")
+	kelasID := c.Query("kelas_id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 
@@ -100,18 +118,52 @@ func (ctrl *cbtController) GetBanks(c *gin.Context) {
 	var banks []model.ToQuestionBank
 	var total int64
 
+	// ✅ Build query dengan filter berdasarkan role
 	query := ctrl.db.Model(&model.ToQuestionBank{}).
 		Where("deleted_at IS NULL").
 		Preload("User").
 		Preload("Mapel").
 		Preload("Kelas")
 
+	// ✅ LOGIC FILTER BERDASARKAN ROLE
+	role := userRole.(string)
+	userIDUint := uint(userID.(float64))
+
+	if role == "admin" {
+		// Admin: lihat SEMUA bank soal
+		// Tidak perlu filter tambahan
+	} else if role == "guru" {
+		// Guru: lihat bank soal yang dibuat oleh:
+		// 1. Guru itu sendiri (created_by = userID)
+		// 2. Admin (created_by = user dengan role 'admin')
+		query = query.Where(
+			"created_by = ? OR created_by IN (SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL)",
+			userIDUint,
+		)
+	} else {
+		// Role lain: hanya lihat milik sendiri
+		query = query.Where("created_by = ?", userIDUint)
+	}
+
+	// Filter search
 	if search != "" {
 		query = query.Where("bank_name LIKE ?", "%"+search+"%")
 	}
 
+	// Filter mapel
+	if mapelID != "" {
+		query = query.Where("kd_mapel = ?", mapelID)
+	}
+
+	// Filter kelas
+	if kelasID != "" {
+		query = query.Where("kelas_id = ?", kelasID)
+	}
+
+	// Count total
 	query.Count(&total)
 
+	// Get paginated data
 	offset := (page - 1) * limit
 	err := query.
 		Offset(offset).
@@ -124,8 +176,10 @@ func (ctrl *cbtController) GetBanks(c *gin.Context) {
 		return
 	}
 
+	// Build response
 	result := make([]dto.BankResponse, len(banks))
 	for i, bank := range banks {
+		// Hitung jumlah soal di bank ini
 		var totalQuestions int64
 		ctrl.db.Model(&model.ToQuestion{}).
 			Where("bank_id = ? AND deleted_at IS NULL", bank.BankID).
@@ -155,7 +209,22 @@ func (ctrl *cbtController) GetBanks(c *gin.Context) {
 	})
 }
 
+// controller/cbt/cbt_controller.go
+
 func (ctrl *cbtController) GetBankByID(c *gin.Context) {
+	// ✅ Ambil user info dari context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	userRole, exists := c.Get("userRole")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -164,16 +233,36 @@ func (ctrl *cbtController) GetBankByID(c *gin.Context) {
 	}
 
 	var bank model.ToQuestionBank
-	err = ctrl.db.
+
+	// ✅ Build query dengan filter akses
+	query := ctrl.db.
 		Preload("User").
 		Preload("Mapel").
 		Preload("Kelas").
-		Where("bank_id = ? AND deleted_at IS NULL", uint(id)).
-		First(&bank).Error
+		Where("bank_id = ? AND deleted_at IS NULL", uint(id))
+
+	// ✅ Cek akses berdasarkan role
+	role := userRole.(string)
+	userIDUint := uint(userID.(float64))
+
+	if role != "admin" {
+		if role == "guru" {
+			// Guru: cek apakah bank milik sendiri atau milik admin
+			query = query.Where(
+				"created_by = ? OR created_by IN (SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL)",
+				userIDUint,
+			)
+		} else {
+			// Role lain: hanya milik sendiri
+			query = query.Where("created_by = ?", userIDUint)
+		}
+	}
+
+	err = query.First(&bank).Error
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "bank soal tidak ditemukan"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "bank soal tidak ditemukan atau tidak memiliki akses"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -331,6 +420,19 @@ func (ctrl *cbtController) DeleteBank(c *gin.Context) {
 }
 
 func (ctrl *cbtController) GetBanksByKelas(c *gin.Context) {
+	// ✅ Ambil user info dari context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	userRole, exists := c.Get("userRole")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found"})
+		return
+	}
+
 	// Ambil parameter kelas_id dari URL
 	kelasIDStr := c.Param("kelas_id")
 	kelasID, err := strconv.ParseUint(kelasIDStr, 10, 32)
@@ -356,11 +458,33 @@ func (ctrl *cbtController) GetBanksByKelas(c *gin.Context) {
 	var banks []model.ToQuestionBank
 	var total int64
 
-	// Query dengan filter kelas_id
+	// ✅ Build query dengan filter role
 	query := ctrl.db.Model(&model.ToQuestionBank{}).
 		Where("kelas_id = ? AND deleted_at IS NULL", uint(kelasID)).
-		Preload("Mapel") // Preload relasi mapel
+		Preload("Mapel").
+		Preload("User") // Preload user untuk mendapatkan created_by_name
 
+	// ✅ LOGIC FILTER BERDASARKAN ROLE
+	role := userRole.(string)
+	userIDUint := uint(userID.(float64))
+
+	if role == "admin" {
+		// Admin: lihat SEMUA bank soal di kelas ini
+		// Tidak perlu filter tambahan
+	} else if role == "guru" {
+		// Guru: lihat bank soal yang dibuat oleh:
+		// 1. Guru itu sendiri (created_by = userID)
+		// 2. Admin (created_by = user dengan role 'admin')
+		query = query.Where(
+			"created_by = ? OR created_by IN (SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL)",
+			userIDUint,
+		)
+	} else {
+		// Role lain: hanya lihat milik sendiri
+		query = query.Where("created_by = ?", userIDUint)
+	}
+
+	// Filter search
 	if search != "" {
 		query = query.Where("bank_name LIKE ?", "%"+search+"%")
 	}
@@ -397,7 +521,9 @@ func (ctrl *cbtController) GetBanksByKelas(c *gin.Context) {
 			MapelName:      getMapelName(bank.Mapel),
 			Description:    bank.Description,
 			TotalQuestions: totalQuestions,
-			CreatedAt:      bank.CreatedAt,
+			// CreatedBy:      bank.CreatedBy,
+			// CreatedByName:  getUserName(bank.User),
+			CreatedAt: bank.CreatedAt,
 		}
 	}
 
