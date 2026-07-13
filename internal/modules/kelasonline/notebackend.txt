@@ -1,0 +1,426 @@
+===========================================
+DATA MASTER UNTUK FRONTEND KELAS ONLINE
+===========================================
+
+1. DATA GURU
+===========================================
+guru_id: 8
+guru_nama: Merik Nugroho S.Kom
+user_id: 69
+email: merik.nugroho@sekolah.com
+
+2. DATA KELAS
+===========================================
+kelas_id: 3
+kelas_nama: Kelas III
+
+3. DATA MATA PELAJARAN
+===========================================
+kd_mapel: 3
+nm_mapel: Bahasa Indonesia
+kode_mapel: BINDO
+
+4. DATA PENUGASAN MENGAJAR (tbl_ta_kelas_mapel)
+===========================================
+ta_kelas_mapel_id: 67
+ta_id: 2
+kelas_id: 3
+kd_mapel: 3
+guru_id: 8
+urutan: 3
+
+5. DATA SISWA (Contoh)
+===========================================
+siswa_id: 1
+siswa_nama: Budi Santoso
+siswa_nis: 2026001
+siswa_kelas_id: 3
+user_id: 70
+email: budi@sekolah.com
+
+
+
+===========================================
+ENDPOINT API KELAS ONLINE
+===========================================
+
+BASE URL: /api/kelasonline
+
+A. PERTEMUAN
+===========================================
+
+1. CREATE PERTEMUAN (Guru)
+   Method: POST
+   Endpoint: /pertemuan
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "ta_kelas_mapel_id": 67,
+     "tema": "Pertemuan 1 - Membaca dan Menulis",
+     "deskripsi": "Materi tentang teknik membaca cepat dan menulis cerita pendek",
+     "tanggal": "2026-07-10T08:00:00Z"
+   }
+
+2. GET PERTEMUAN BY GURU
+   Method: GET
+   Endpoint: /pertemuan/guru
+   Auth: Bearer Token (Guru)
+
+3. GET PERTEMUAN BY SISWA
+   Method: GET
+   Endpoint: /pertemuan/siswa
+   Auth: Bearer Token (Siswa)
+
+4. GET PERTEMUAN BY ID
+   Method: GET
+   Endpoint: /pertemuan/:id
+   Auth: Bearer Token (Guru/Siswa)
+   Example: /pertemuan/1
+
+5. UPDATE PERTEMUAN (Guru - Hanya Draft)
+   Method: PUT
+   Endpoint: /pertemuan/:id
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "tema": "Pertemuan 1 - Membaca Cepat dan Menulis Cerpen",
+     "deskripsi": "Materi tentang teknik membaca cepat, memahami isi bacaan, dan menulis cerita pendek yang menarik",
+     "tanggal": "2026-07-11T08:00:00Z"
+   }
+
+6. DELETE PERTEMUAN (Guru - Hanya Draft)
+   Method: DELETE
+   Endpoint: /pertemuan/:id
+   Auth: Bearer Token (Guru)
+   Example: /pertemuan/2
+
+
+B. MATERI
+===========================================
+
+1. CREATE MATERI (Guru)
+   Method: POST
+   Endpoint: /materi
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "pertemuan_id": 1,
+     "judul": "Materi Membaca dan Menulis",
+     "konten": "<h1>Membaca Cepat dan Menulis Cerpen</h1><p>Teknik membaca cepat:</p><ul><li>Scanning</li><li>Skimming</li></ul><p>Contoh cerpen: <a href='https://youtu.be/xxx'>Link Youtube</a></p><p>Bahan bacaan: <a href='https://drive.google.com/xxx'>Download PDF</a></p>"
+   }
+
+2. GET MATERI BY PERTEMUAN
+   Method: GET
+   Endpoint: /materi/pertemuan/:pertemuan_id
+   Auth: Bearer Token (Guru/Siswa)
+   Example: /materi/pertemuan/1
+
+3. UPDATE MATERI (Guru)
+   Method: PUT
+   Endpoint: /materi/:id
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "judul": "Materi Membaca dan Menulis - Update",
+     "konten": "<h1>Membaca Cepat dan Menulis Cerpen</h1><p>Updated content...</p>"
+   }
+
+4. DELETE MATERI (Guru)
+   Method: DELETE
+   Endpoint: /materi/:id
+   Auth: Bearer Token (Guru)
+
+
+C. MEETING & KELAS ONLINE
+===========================================
+
+1. BUKA KELAS (Guru - Buat Google Meet)
+   Method: POST
+   Endpoint: /meeting/buka
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "pertemuan_id": 1
+   }
+
+2. TUTUP KELAS (Guru)
+   Method: POST
+   Endpoint: /meeting/tutup
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "pertemuan_id": 1
+   }
+
+3. GET MEETING BY PERTEMUAN
+   Method: GET
+   Endpoint: /meeting/pertemuan/:pertemuan_id
+   Auth: Bearer Token (Guru/Siswa)
+   Example: /meeting/pertemuan/1
+
+
+D. ABSENSI
+===========================================
+
+1. JOIN KELAS (Siswa)
+   Method: POST
+   Endpoint: /absensi/join
+   Auth: Bearer Token (Siswa)
+   
+   Request Body:
+   {
+     "pertemuan_id": 1
+   }
+
+2. CREATE ABSENSI (Guru)
+   Method: POST
+   Endpoint: /absensi
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "pertemuan_id": 1,
+     "siswa_id": 1,
+     "catatan": "Hadir tepat waktu dan aktif bertanya"
+   }
+
+3. GET ABSENSI BY PERTEMUAN (Guru)
+   Method: GET
+   Endpoint: /absensi/pertemuan/:pertemuan_id
+   Auth: Bearer Token (Guru)
+   Example: /absensi/pertemuan/1
+
+4. GET ABSENSI BY SISWA (Siswa)
+   Method: GET
+   Endpoint: /absensi/siswa
+   Auth: Bearer Token (Siswa)
+
+5. UPDATE ABSENSI (Guru)
+   Method: PUT
+   Endpoint: /absensi/:id
+   Auth: Bearer Token (Guru)
+   
+   Request Body:
+   {
+     "status_final": "hadir",
+     "catatan": "Hadir, aktif bertanya, dan mengerjakan tugas dengan baik"
+   }
+   
+   Status Final Options: "hadir", "izin", "sakit", "alfa"
+
+6. VALIDASI ABSENSI (Guru)
+   Method: PUT
+   Endpoint: /absensi/:id/validasi
+   Auth: Bearer Token (Guru)
+   Example: /absensi/1/validasi
+
+
+
+===========================================
+FLOW BISNIS UNTUK FRONTEND
+===========================================
+
+1. GURU FLOW
+===========================================
+Step 1: Login → Dapatkan Token
+Step 2: GET /pertemuan/guru → Lihat semua pertemuan yang diajar
+Step 3: POST /pertemuan → Buat pertemuan baru (status: draft)
+Step 4: POST /materi → Tambahkan materi untuk pertemuan
+Step 5: PUT /pertemuan/:id → Edit pertemuan (hanya draft)
+Step 6: POST /meeting/buka → Buka kelas (status: berlangsung) + Buat Google Meet
+Step 7: POST /absensi → Buat absensi untuk siswa
+Step 8: PUT /absensi/:id → Update status absensi (hadir/izin/sakit/alfa)
+Step 9: PUT /absensi/:id/validasi → Validasi absensi
+Step 10: POST /meeting/tutup → Tutup kelas (status: selesai)
+Step 11: DELETE /pertemuan/:id → Hapus pertemuan (hanya draft)
+
+2. SISWA FLOW
+===========================================
+Step 1: Login → Dapatkan Token
+Step 2: GET /pertemuan/siswa → Lihat semua pertemuan di kelasnya
+Step 3: GET /pertemuan/:id → Detail pertemuan (lihat materi & status)
+Step 4: GET /materi/pertemuan/:pertemuan_id → Baca materi
+Step 5: IF status = "berlangsung" → POST /absensi/join → Dapatkan URL Meet
+Step 6: GET /absensi/siswa → Lihat riwayat absensi
+
+
+
+===========================================
+STATUS PERTEMUAN
+===========================================
+- draft: Belum dibuka, bisa diedit & dihapus
+- dibuka: Sudah dibuka tapi belum berlangsung (belum implementasi)
+- berlangsung: Sedang berlangsung, siswa bisa join
+- selesai: Kelas selesai, siswa tidak bisa join lagi
+
+===========================================
+STATUS ABSENSI FINAL
+===========================================
+- belum_divalidasi: Default saat dibuat
+- hadir: Siswa hadir (divalidasi guru)
+- izin: Siswa izin (divalidasi guru)
+- sakit: Siswa sakit (divalidasi guru)
+- alfa: Siswa alfa/tidak hadir (divalidasi guru)
+
+
+
+===========================================
+DATA YANG DIBUTUHKAN FRONTEND
+===========================================
+
+A. Untuk Tampilan List Pertemuan (Guru):
+{
+  "pertemuan_id": 1,
+  "pertemuan_ke": 1,
+  "tema": "Pertemuan 1 - Membaca Cepat dan Menulis Cerpen",
+  "tanggal": "2026-07-11T08:00:00Z",
+  "status": "berlangsung",
+  "kelas": "Kelas III",
+  "mapel": "Bahasa Indonesia"
+}
+
+B. Untuk Tampilan Detail Pertemuan:
+{
+  "pertemuan_id": 1,
+  "pertemuan_ke": 1,
+  "tema": "Pertemuan 1 - Membaca Cepat dan Menulis Cerpen",
+  "deskripsi": "Materi tentang teknik membaca cepat...",
+  "tanggal": "2026-07-11T08:00:00Z",
+  "status": "berlangsung",
+  "ta_kelas_mapel": {
+    "kelas": {"kelas_nama": "Kelas III"},
+    "mapel": {"nm_mapel": "Bahasa Indonesia"}
+  },
+  "guru": {"guru_nama": "Merik Nugroho S.Kom"},
+  "materi": {
+    "judul": "Materi Membaca dan Menulis",
+    "konten": "<h1>Membaca Cepat...</h1>"
+  },
+  "meeting": {
+    "meeting_url": "https://meet.google.com/abc-defg-hij"
+  },
+  "absensi": [
+    {
+      "siswa_id": 1,
+      "siswa_nama": "Budi Santoso",
+      "status_final": "hadir"
+    }
+  ]
+}
+
+C. Untuk Tampilan Absensi (Guru):
+{
+  "absensi_id": 1,
+  "pertemuan_id": 1,
+  "siswa_id": 1,
+  "siswa_nama": "Budi Santoso",
+  "siswa_nis": "2026001",
+  "join_time": "2026-07-09T10:35:00Z",
+  "via_lms": true,
+  "status_final": "hadir",
+  "catatan": "Hadir, aktif bertanya...",
+  "validated_by": 8,
+  "validated_at": "2026-07-09T10:45:00Z"
+}
+
+
+
+===========================================
+AUTHENTICATION
+===========================================
+Semua endpoint menggunakan Bearer Token:
+Authorization: Bearer <token>
+
+Token didapat dari endpoint login:
+POST /api/login
+
+Request Body:
+{
+  "email": "merik.nugroho@sekolah.com",
+  "password": "password123"
+}
+
+
+
+===========================================
+CONTOH RESPONSE ERROR
+===========================================
+1. Unauthorized (Token Invalid/Expired):
+{
+  "error": "Token tidak valid atau sudah kadaluarsa"
+}
+
+2. Forbidden (Tidak punya akses):
+{
+  "error": "Anda tidak memiliki akses ke penugasan ini"
+}
+
+3. Bad Request (Validasi error):
+{
+  "error": "Key: 'CreatePertemuanRequest.Tema' Error:Field validation for 'Tema' failed on the 'required' tag"
+}
+
+4. Not Found:
+{
+  "error": "Pertemuan tidak ditemukan"
+}
+
+
+
+===========================================
+CATATAN PENTING UNTUK FRONTEND
+===========================================
+
+1. Tombol "Buka Kelas" hanya muncul jika:
+   - Role: Guru
+   - Status pertemuan: draft
+   - Materi sudah dibuat
+
+2. Tombol "Join Kelas" hanya muncul jika:
+   - Role: Siswa
+   - Status pertemuan: berlangsung atau dibuka
+
+3. Tombol "Tutup Kelas" hanya muncul jika:
+   - Role: Guru
+   - Status pertemuan: berlangsung
+
+4. Tombol "Edit" & "Hapus" hanya muncul jika:
+   - Role: Guru
+   - Status pertemuan: draft
+
+5. Form Absensi (Guru):
+   - Bisa dibuat saat status = berlangsung
+   - Status final: hadir, izin, sakit, alfa
+   - Validasi bisa dilakukan saat status = berlangsung atau selesai
+
+6. Siswa hanya bisa melihat:
+   - Pertemuan di kelasnya sendiri
+   - Materi dari pertemuan yang sudah dibuka
+   - Meeting URL hanya saat status = berlangsung atau dibuka
+
+7. Tanggal format: ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)
+   Contoh: "2026-07-11T08:00:00Z"
+
+8. Status Pertemuan untuk UI:
+   - draft: Badge Warna Abu-abu "Draft"
+   - dibuka: Badge Warna Biru "Dibuka"
+   - berlangsung: Badge Warna Hijau "Berlangsung"
+   - selesai: Badge Warna Merah "Selesai"
+
+9. Status Absensi untuk UI:
+   - belum_divalidasi: Badge Warna Kuning "Menunggu Validasi"
+   - hadir: Badge Warna Hijau "Hadir"
+   - izin: Badge Warna Biru "Izin"
+   - sakit: Badge Warna Orange "Sakit"
+   - alfa: Badge Warna Merah "Alfa"
+
+10. Fitur Upload:
+    - Materi mendukung rich text (HTML)
+    - Bisa embed YouTube, Google Drive, PDF
+    - Pastikan sanitasi HTML untuk keamanan

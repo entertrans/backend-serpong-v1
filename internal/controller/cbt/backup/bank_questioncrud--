@@ -241,8 +241,7 @@ func (ctrl *cbtController) UpdateQuestion(c *gin.Context) {
 		return
 	}
 
-	// PERBAIKAN: Gunakan UpdateQuestionRequest, bukan CreateQuestionRequest
-	var req dto.UpdateQuestionRequest
+	var req dto.CreateQuestionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -272,10 +271,7 @@ func (ctrl *cbtController) UpdateQuestion(c *gin.Context) {
 		question.Explanation = req.Explanation
 	}
 	if req.BankID != nil {
-		question.BankID = *req.BankID
-	}
-	if req.QuestionType != nil {
-		question.QuestionType = *req.QuestionType
+		question.BankID = req.BankID
 	}
 
 	if err := tx.Save(&question).Error; err != nil {
@@ -285,7 +281,6 @@ func (ctrl *cbtController) UpdateQuestion(c *gin.Context) {
 	}
 
 	// Delete existing related data and create new ones
-	// PERBAIKAN: Ubah parameter req menjadi pointer
 	if err := updateQuestionRelatedData(tx, &question, &req); err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -335,59 +330,30 @@ func (ctrl *cbtController) DeleteQuestion(c *gin.Context) {
 // INTERNAL HELPER FUNCTIONS FOR QUESTION
 // ============================================
 
-func updateQuestionRelatedData(tx *gorm.DB, question *model.ToQuestion, req *dto.UpdateQuestionRequest) error {
-	// Delete existing data based on question type
+func updateQuestionRelatedData(tx *gorm.DB, question *model.ToQuestion, req *dto.CreateQuestionRequest) error {
 	switch question.QuestionType {
 	case "MCQ", "MULTI_MCQ", "TRUE_FALSE":
-		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToOption{}).Error; err != nil {
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionOption{}).Error; err != nil {
 			return err
 		}
-		// Create new options
-		if len(req.Options) > 0 {
-			for _, opt := range req.Options {
-				option := &model.ToOption{
-					QuestionID:  question.QuestionID,
-					OptionLabel: opt.Label,
-					OptionText:  opt.Text,
-					IsCorrect:   opt.IsCorrect,
-					SortOrder:   opt.SortOrder,
-				}
-				if err := tx.Create(option).Error; err != nil {
-					return err
-				}
-			}
+		if err := createOptions(tx, question.QuestionID, req.Options); err != nil {
+			return err
 		}
+
 	case "SHORT_ANSWER":
-		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToShortAnswer{}).Error; err != nil {
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionShortAnswer{}).Error; err != nil {
 			return err
 		}
-		if len(req.ValidAnswers) > 0 {
-			for _, answer := range req.ValidAnswers {
-				shortAnswer := &model.ToShortAnswer{
-					QuestionID:  question.QuestionID,
-					ValidAnswer: answer,
-				}
-				if err := tx.Create(shortAnswer).Error; err != nil {
-					return err
-				}
-			}
+		if err := createShortAnswers(tx, question.QuestionID, req.ValidAnswers); err != nil {
+			return err
 		}
+
 	case "MATCHING":
-		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToMatching{}).Error; err != nil {
+		if err := tx.Where("question_id = ?", question.QuestionID).Delete(&model.ToQuestionMatching{}).Error; err != nil {
 			return err
 		}
-		if len(req.MatchingPairs) > 0 {
-			for _, pair := range req.MatchingPairs {
-				matching := &model.ToMatching{
-					QuestionID: question.QuestionID,
-					LeftText:   pair.LeftText,
-					RightText:  pair.RightText,
-					PairOrder:  pair.PairOrder,
-				}
-				if err := tx.Create(matching).Error; err != nil {
-					return err
-				}
-			}
+		if err := createMatchingPairs(tx, question.QuestionID, req.MatchingPairs); err != nil {
+			return err
 		}
 	}
 	return nil

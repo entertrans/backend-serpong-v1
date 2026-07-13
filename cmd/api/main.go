@@ -13,6 +13,7 @@ import (
 	avatarmodule "github.com/entertrans/backend-bogor.git/internal/modules/avatar"
 	cbtmodule "github.com/entertrans/backend-bogor.git/internal/modules/cbt"
 	financemodule "github.com/entertrans/backend-bogor.git/internal/modules/finance"
+	"github.com/entertrans/backend-bogor.git/internal/modules/kelasonline"
 	lampiranmodule "github.com/entertrans/backend-bogor.git/internal/modules/lampiran"
 	masterdatamodule "github.com/entertrans/backend-bogor.git/internal/modules/masterdata"
 	pingmodule "github.com/entertrans/backend-bogor.git/internal/modules/ping"
@@ -59,6 +60,7 @@ func main() {
 		rapor.Register,
 		financemodule.Register,
 		cbtmodule.Register,
+		kelasonline.Register,
 	)
 
 	port := ":" + cfg.AppPort
